@@ -17,12 +17,15 @@ export class Questsion{
   question_text: string;
 
   @Column({type:'text', nullable: true})
+  example_text: string;
+
+  @Column({type:'text', nullable: true})
   question_image_url: string;
 
-  @Column({type:'int', nullable: false})
-  correct_answer: number;
+  @Column({type:'jsonb', nullable: false})
+  correct_answers: number[];
 
-  @CreateDateColumn({type: 'timestamp'})
+  @CreateDateColumn({type: 'timestamptz'})
   created_at: Date;
 
   @ManyToOne(() => Exam)

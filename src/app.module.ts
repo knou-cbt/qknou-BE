@@ -45,6 +45,7 @@ function encodePasswordInUrl(url: string): string {
           url: encodedUrl,
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           synchronize: true, // 기존 데이터와 충돌을 피하기 위해 비활성화
+          timezone: 'Asia/Seoul', // 한국 시간대 설정
           ssl: {
             rejectUnauthorized: false,  
         },
