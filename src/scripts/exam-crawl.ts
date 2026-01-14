@@ -12,8 +12,8 @@ async function bootstrap() {
 
   if (!url) {
     console.error('❌ 사용법: npm run crawl <URL> [--retry]');
-    console.error('예시: npm run crawl https://allaclass.tistory.com/855');
-    console.error('     npm run crawl https://allaclass.tistory.com/855 --retry  (부분 저장된 경우 재시도)');
+    console.error('예시: npm run crawl https://크롤링사이트/855');
+    console.error('     npm run crawl https://크롤링사이트/855 --retry  (부분 저장된 경우 재시도)');
     process.exit(1);
   }
 

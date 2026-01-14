@@ -6,7 +6,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SubjectsModule } from './subjects/subjects.module';
 import { ExamsModule } from './exams/exams.module';
 import { QuestionsModule } from './questions/questions.module';
-import { ChoicesModule } from './choices/choices.module';
 
 // DATABASE_URL의 비밀번호 부분을 URL 인코딩하는 함수
 function encodePasswordInUrl(url: string): string {
@@ -61,7 +60,6 @@ function encodePasswordInUrl(url: string): string {
     SubjectsModule,
     ExamsModule,
     QuestionsModule,
-    ChoicesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

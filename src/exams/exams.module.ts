@@ -4,12 +4,11 @@ import { ExamsService } from './exams.service';
 import { Exam } from './entities/exam.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
-import { Choice } from 'src/choices/entities/choice.entity';
 import { SubjectsModule } from 'src/subjects/subjects.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Exam, Questsion, Choice]),
+    TypeOrmModule.forFeature([Exam, Questsion]),
     SubjectsModule
   ],
   controllers: [ExamsController],

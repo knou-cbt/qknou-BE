@@ -9,7 +9,7 @@ export class Subject{
   @Column({type:'varchar', length: 255, nullable: false})
   name: string;
 
-  @CreateDateColumn({type: 'timestamp'})
+  @CreateDateColumn({type: 'timestamptz'})
   created_at: Date;
 
   @OneToMany(() => Exam, (exam) => exam.subject)

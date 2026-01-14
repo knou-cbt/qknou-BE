@@ -3,7 +3,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Exam } from './entities/exam.entity';
 import { DataSource, Repository } from 'typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
-import { Choice } from 'src/choices/entities/choice.entity';
 import { SubjectsService } from 'src/subjects/subjects.service';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
@@ -24,9 +23,6 @@ export class ExamsService {
     @InjectRepository(Questsion)
     private questionRepository: Repository<Questsion>,
 
-    @InjectRepository(Choice)
-    private choiceRepository: Repository<Choice>,
-
     private subjectsService: SubjectsService,
     private dataSource: DataSource
   ) { }
@@ -45,11 +41,22 @@ export class ExamsService {
   }
 
   // 시험 타입 파싱
+  // 1: 1학기 기말, 2: 2학기 기말, 3: 하계 계절학기, 4: 동계 계절학기
   private parseExamType(examTypeText: string): number {
-    if (examTypeText.includes('기말')) return 1;
-    if (examTypeText.includes('중간')) return 2;
-    if (examTypeText.includes('계절')) return 3;
-    return 1; // 기본값
+    // 계절학기 체크 (하계/동계 구분)
+    if (examTypeText.includes('계절')) {
+      if (examTypeText.includes('하계')) return 3;  // 하계 계절학기
+      if (examTypeText.includes('동계')) return 4;  // 동계 계절학기
+      return 3; // 계절학기 (하계/동계 구분 안 됨)
+    }
+    
+    // 기말시험 체크 (1학기/2학기 구분)
+    if (examTypeText.includes('기말')) {
+      if (examTypeText.includes('2학기') || examTypeText.includes('2 학기')) return 2;  // 2학기 기말
+      return 1; // 1학기 기말 (기본값)
+    }
+    
+    return 1; // 기본값: 1학기 기말
   }
 
   async saveExamFromUrl(url: string, forceRetry: boolean = false) {
@@ -287,7 +294,7 @@ export class ExamsService {
       const savedExam = await manager.save(exam);
       console.log(`  ✅ 시험 저장 완료 (ID: ${savedExam.id})`);
 
-      // 5-4. 문제 및 선택지 저장
+      // 5-4. 문제 및 선택지 저장 (JSONB로 한 번에 저장)
       for (const questionData of questions) {
         const correctAnswers = answerMap.get(questionData.questionNumber);
         
@@ -302,20 +309,10 @@ export class ExamsService {
           question_text: questionData.questionText,
           example_text: questionData.exampleText,
           question_image_url: questionData.questionImageUrl,
-          correct_answers: correctAnswers
+          correct_answers: correctAnswers,
+          choices: questionData.choices  // JSONB로 선택지 저장
         });
-        const savedQuestion = await manager.save(question);
-
-        // 선택지 저장
-        for (const choiceData of questionData.choices) {
-          const choice = manager.create(Choice, {
-            question_id: savedQuestion.id,
-            choice_number: choiceData.choiceNumber,
-            choice_text: choiceData.choiceText,
-            choice_image_url: choiceData.choiceImageUrl
-          });
-          await manager.save(choice);
-        }
+        await manager.save(question);
       }
 
       console.log(`  ✅ ${questions.length}개 문제 및 선택지 저장 완료`);
