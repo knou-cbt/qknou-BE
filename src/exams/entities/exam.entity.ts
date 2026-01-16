@@ -22,7 +22,7 @@ export class Exam{
   @Column({ type: 'int', nullable: false })
   total_questions: number;
 
-  @CreateDateColumn({type: 'timestamp'})
+  @CreateDateColumn({type: 'timestamptz'})
   created_at: Date
 
   //여러 시험이 하나의 과목에 속함
