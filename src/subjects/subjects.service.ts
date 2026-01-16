@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Like, Repository } from 'typeorm';
 import { Subject } from './entities/subject.entity';
 
 /**
@@ -28,9 +28,65 @@ export class SubjectsService {
     if (!subject) {
       subject = this.subjectRepository.create({ name });
       subject = await this.subjectRepository.save(subject);
-      console.log(`✨ 새 과목 생성: ${name}`);
+      console.log(`새 과목 생성: ${name}`);
     }
     
     return subject;
   }
+
+  //과목 목록 조회(검색+페이지네이션)
+  /**
+   * @param search - 과목명 검색어(선택사항)
+   * @param page - 페이지 번호(선택사항, 기본값 1)
+   * @param limit - 페이지당 항목 수(선택사항, 기본값 10)
+   * @returns 과목 목록
+   */
+  async findAll(search?: string, page: number = 1, limit: number = 10) {
+    //1.skip계산(건너뛸 항목 수)
+    const skip = (page - 1) * limit;
+
+    //2.WHERE 조건(검색어가 있으면 LIKE 검색)
+    const where =search ? { name: Like(`%${search}%`) } : {};
+
+    //3.DB 조회
+    const [subjects, total] = await this.subjectRepository.findAndCount({
+      where,
+      skip,
+      take: limit,
+      order: { name: 'ASC'}
+    });
+    //4.응답 형식으로 변환
+    return {
+      subjects: subjects.map(subject => ({
+        id: subject.id,
+        name: subject.name,
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    }
+  }
+
+  /**
+   * 특정 과목 상세 조회
+   */
+  async findOne(id: number) {
+    //1.DB에서 과목을 조회
+    const subject = await this.subjectRepository.findOne({
+      where: {id},
+    })
+    //2. 없으면 404 에러
+    if (!subject) {
+      throw new NotFoundException(`과목 id ${id}를 찾을 수 없습니다.`)
+    }
+    //3. 있으면 응답 형식으로 변환
+    return {
+      id: subject.id,
+      name: subject.name,
+    }
+  }
+
 }

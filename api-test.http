@@ -1,0 +1,57 @@
+### REST Client API 테스트 파일
+### 각 요청 위의 "Send Request" 버튼을 클릭하거나 Ctrl+Alt+R (Mac: Cmd+Alt+R)로 실행
+
+@baseUrl = http://localhost:3000
+@contentType = application/json
+
+### ============================================
+### Subjects API
+### ============================================
+
+### 1. 과목 목록 조회 (전체)
+GET {{baseUrl}}/api/subjects
+
+### 2. 과목 목록 조회 (검색)
+GET {{baseUrl}}/api/subjects?search=사회복지
+
+### 3. 과목 목록 조회 (페이지네이션)
+GET {{baseUrl}}/api/subjects?page=1&limit=5
+
+### 4. 과목 목록 조회 (검색 + 페이지네이션)
+GET {{baseUrl}}/api/subjects?search=사회&page=1&limit=10
+
+### 5. 특정 과목 상세 조회
+GET {{baseUrl}}/api/subjects/1
+
+### 6. 존재하지 않는 과목 조회 (404 테스트)
+GET {{baseUrl}}/api/subjects/99999
+
+### ============================================
+### Exams API (추후 구현 예정)
+### ============================================
+
+### 7. 특정 과목의 시험지 목록 조회
+# GET {{baseUrl}}/api/subjects/1/exams
+
+### 8. 시험 문제 조회 (study 모드)
+# GET {{baseUrl}}/api/exams/1/questions?mode=study
+
+### 9. 시험 문제 조회 (test 모드)
+# GET {{baseUrl}}/api/exams/1/questions?mode=test
+
+### 10. 시험 답안 제출
+# POST {{baseUrl}}/api/exams/1/submit
+# Content-Type: {{contentType}}
+# 
+# {
+#   "answers": [
+#     {
+#       "questionId": 1,
+#       "selectedAnswer": 2
+#     },
+#     {
+#       "questionId": 2,
+#       "selectedAnswer": 1
+#     }
+#   ]
+# }
