@@ -9,16 +9,17 @@ async function bootstrap() {
   // 명령줄 인자 파싱
   const url = process.argv[2];
   const forceRetry = process.argv.includes('--retry') || process.argv.includes('-r');
-
+  
+  //url 없으면 사용법 출력하고 종료
   if (!url) {
-    console.error('❌ 사용법: npm run crawl <URL> [--retry]');
-    console.error('예시: npm run crawl https://크롤링사이트/855');
-    console.error('     npm run crawl https://크롤링사이트/855 --retry  (부분 저장된 경우 재시도)');
+    console.error('사용법: yarn crawl <URL> [--retry]');
+    console.error('예시: yarn crawl https://크롤링사이트/855');
+    console.error('     yarn crawl https://크롤링사이트/855 --retry  (부분 저장된 경우 재시도)');
     process.exit(1);
   }
 
   // NestJS 애플리케이션 컨텍스트 생성 (서버는 띄우지 않음)
-  console.log('🚀 NestJS 애플리케이션 초기화 중...');
+  console.log('NestJS 애플리케이션 초기화 중...');
   const app = await NestFactory.createApplicationContext(AppModule);
 
   try {
@@ -45,7 +46,7 @@ async function bootstrap() {
     if (error.message.includes('부분적으로 저장된')) {
       console.error('');
       console.error('💡 해결 방법: --retry 옵션을 사용하여 다시 시도하세요.');
-      console.error('   예시: npm run crawl ' + url + ' --retry');
+      console.error('   예시: yarn crawl ' + url + ' --retry');
     }
     process.exit(1);
   } finally {
