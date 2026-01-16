@@ -26,15 +26,15 @@ export class Questsion{
 
   @Column({type:'jsonb', nullable: false})
   choices: Array<{
-    choiceNumber: number;
-    choiceText: string;
-    choiceImageUrl: string | null;
+    number: number;
+    text: string;
+    imageUrl: string | null;
   }>;
 
   @CreateDateColumn({type: 'timestamptz'})
   created_at: Date;
 
-  @ManyToOne(() => Exam)
+  @ManyToOne(() => Exam, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'exam_id' })
   exam: Exam;
 }

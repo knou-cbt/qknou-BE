@@ -29,4 +29,13 @@ export class SubjectsController {
     return {success: true, data}  
   } 
 
+  /**
+   * GET /api/subjects/:subjectId/exams
+   * 
+   */
+  @Get(':subjectId/exams')
+  async findExamsBySubject(@Param('subjectId', ParseIntPipe) subjectId: number) {
+    const data = await this.subjectsService.findExamsBySubject(subjectId);
+    return {success: true, data}
+  }
 }

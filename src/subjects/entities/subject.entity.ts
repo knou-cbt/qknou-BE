@@ -12,6 +12,6 @@ export class Subject{
   @CreateDateColumn({type: 'timestamptz'})
   created_at: Date;
 
-  @OneToMany(() => Exam, (exam) => exam.subject)
+  @OneToMany(() => Exam, (exam) => exam.subject, { cascade: true })
   exams: Exam[]
 }

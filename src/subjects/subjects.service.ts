@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Like, Repository } from 'typeorm';
 import { Subject } from './entities/subject.entity';
+import { Exam } from 'src/exams/entities/exam.entity';
 
 /**
  * 과목(Subject) 관련 비즈니스 로직을 처리하는 서비스
@@ -12,6 +13,8 @@ export class SubjectsService {
   constructor(
     @InjectRepository(Subject)
     private subjectRepository: Repository<Subject>,
+    @InjectRepository(Exam)
+    private examRepository: Repository<Exam>
   ) {}
 
   /**
@@ -87,6 +90,32 @@ export class SubjectsService {
       id: subject.id,
       name: subject.name,
     }
+  }
+
+  /**
+   *  특정 과목의 시험지 목록 조회
+   *  @param subjectId - 과목 ID
+   */
+  async findExamsBySubject(subjectId: number) {
+    const subject = await this.subjectRepository.findOne({
+      where: { id: subjectId }
+    })
+
+    if (!subject) {
+      throw new NotFoundException(`과목 id ${subjectId}를 찾을 수 없습니다.`)
+    }
+
+    const exams = await this.examRepository.find({
+      where: { subject_id: subjectId },
+      order:{year:'DESC', exam_type:'ASC'}
+    })
+
+    return exams.map(exam => ({
+      id: exam.id,
+      title: exam.title,
+      year: exam.year,
+      examType: exam.exam_type,
+    }))
   }
 
 }

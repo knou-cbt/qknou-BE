@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Exam } from './entities/exam.entity';
-import { DataSource } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
 import { SubjectsService } from 'src/subjects/subjects.service';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { Subject } from 'rxjs';
+import { InjectRepository } from '@nestjs/typeorm';
 
 /**
  * 복수 정답 매핑 테이블
@@ -24,9 +26,129 @@ const MULTIPLE_ANSWER_MAP: Record<string, number[]> = {
 @Injectable()
 export class ExamsService {
   constructor(
+   
+    @InjectRepository(Exam)
+    private examRepository: Repository<Exam>,
+    @InjectRepository(Questsion)
+    private questionRepository: Repository<Questsion>,
     private subjectsService: SubjectsService,  // 과목 관리 서비스
     private dataSource: DataSource              // TypeORM DataSource (트랜잭션 처리용)
+
   ) { }
+
+  /**
+   * 시험 문제 조회
+   * @param examId - 시험 ID
+   * @param mode - 모드 (study, test)
+   */
+  async findQuestions(examId: number, mode: 'study' | 'test' = 'test') {
+    //1.시험 정보 조회
+    const exam = await this.examRepository.findOne({
+      where: { id: examId },
+      relations: ['subject'] 
+    })
+    
+    if (!exam) {
+      throw new NotFoundException(`시험 id ${examId}를 찾을 수 없습니다.`)
+    }
+    //2.문제 조회
+    const questions = await this.questionRepository.find({
+      where: { exam_id: examId },
+      order: {question_number: 'ASC'}
+    })
+    if (questions.length === 0) {
+      throw new NotFoundException(`시험 id ${examId}에 문제가 없습니다.`)
+    }
+    const isStudyMode = mode === 'study'
+
+    //3. 응답 형식으로 변환
+    return {
+      exam: {
+        id: exam.id,
+        title: exam.title,
+        subject: exam.subject.name,
+        totalQuesetions: exam.total_questions,
+      },
+      questions: questions.map(question => {
+        const questionData: any = {
+          id: question.id,
+          number: question.question_number,
+          text: question.question_text,
+          example: question.example_text,
+          imageUrl: question.question_image_url,
+          choices: question.choices,
+        };
+        
+        //study 모드일때만 정답 포함 
+        if (isStudyMode) {
+          questionData.correctAnswers = question.correct_answers;
+        }
+        
+        return questionData;
+      })
+    };
+  }
+   
+  /**
+   * 답안 제출 및 채점
+   */
+  async submitExam(
+    examId: number,
+    answers: {questionId: number, selectedAnswer: number}[]
+  ) {
+    //1. 시험 정보 조회
+    const exam = await this.examRepository.findOne({
+      where: {id: examId}
+    })
+    if (!exam) {
+      throw new NotFoundException(`시험 id ${examId}를 찾을 수 없습니다.`)
+    }
+    //2.문제 조회
+    const questions = await this.questionRepository.find({
+      where: { exam_id: examId },
+      order: {question_number: 'ASC'}
+    })
+
+    //3.사용자가 제출한 답안을 Map으로 변환
+    const answerMap = new Map(
+      answers.map(a => [a.questionId, a.selectedAnswer])
+    )
+
+    //4.채점 
+    let correctCount = 0;
+    const results = questions.map(question => {
+      //사용자 답안 가져오기
+      const userAnswer = answerMap.get(question.id) || null
+      console.log("userAnswer(문제에 대한 답) >> ", userAnswer);
+      
+      //복수 정답 처리: 사용자 답안이 정답 배열에 포함되어 있으면 정답
+      const isCorrect = userAnswer !== null &&
+        question.correct_answers.includes(userAnswer)
+
+      if (!isCorrect) {
+        correctCount++
+      }
+
+      return {
+        questionId: question.id,
+        questionNumber: question.question_number,
+        userAnswer,
+        correctAnswer: question.correct_answers,
+        isCorrect,
+      }
+    })
+
+    //5. 점수 계산
+    const score =Math.round((correctCount / questions.length)*100)
+    return {
+      examId,
+      totalQuestions: questions.length,
+      correctCount,
+      score,
+      results,
+    }
+
+  }
 
   /**
    * 정답 문자열을 숫자 배열로 변환
@@ -164,7 +286,7 @@ export class ExamsService {
     
     const examType = this.parseExamType(examTypeText);
     const yearText = year ? `${year}년도` : '연도 미상';
-    const title = `${subjectName} ${examTypeText} ${yearText}`;
+    const title = subjectName;  // title에는 과목명만 저장 (year, exam_type은 별도 컬럼으로 관리)
     
     console.log(`  - 과목: ${subjectName}`);
     console.log(`  - 시험 종류: ${examTypeText} (타입: ${examType})`);
@@ -186,9 +308,9 @@ export class ExamsService {
       exampleText: string | null;      // 보기문 (선택사항)
       questionImageUrl: string | null; // 문제 이미지 URL
       choices: Array<{                 // 선택지 배열 (JSONB로 저장됨)
-        choiceNumber: number;          // 선택지 번호 (1~4)
-        choiceText: string;            // 선택지 텍스트
-        choiceImageUrl: string | null; // 선택지 이미지 URL
+        number: number;                // 선택지 번호 (1~4)
+        text: string;                  // 선택지 텍스트
+        imageUrl: string | null;       // 선택지 이미지 URL
       }>;
     }> = [];
 
@@ -236,9 +358,9 @@ export class ExamsService {
 
       // 선택지 배열 초기화
       const choices: Array<{
-        choiceNumber: number;
-        choiceText: string;
-        choiceImageUrl: string | null;
+        number: number;
+        text: string;
+        imageUrl: string | null;
       }> = [];
 
       // 각 선택지 행을 순회하며 데이터 추출
@@ -258,9 +380,9 @@ export class ExamsService {
         const choiceImageUrl = label.find('img').first().attr('src') || null;
 
         choices.push({
-          choiceNumber,
-          choiceText,
-          choiceImageUrl
+          number: choiceNumber,
+          text: choiceText,
+          imageUrl: choiceImageUrl
         });
       });
 
@@ -353,39 +475,54 @@ export class ExamsService {
     console.log('💾 데이터베이스 저장 중...');
     
     return await this.dataSource.transaction(async (manager) => {
-      // 5-1. 중복 체크 및 재시도 처리
-      if (forceRetry) {
-        // --retry 옵션: 기존 데이터 삭제 후 재저장
-        const existingExam = await manager.findOne(Exam, { where: { title } });
-        if (existingExam) {
-          console.log('  ⚠️  기존 시험 삭제 중...');
-          await manager.delete(Exam, existingExam.id);  // CASCADE로 문제도 함께 삭제됨
-          console.log('  ✅ 삭제 완료');
-        }
-      } else {
-        // 일반 모드: 중복 시 에러 발생
-        const existingExam = await manager.findOne(Exam, { where: { title } });
-        if (existingExam) {
-          throw new Error(
-            `부분적으로 저장된 데이터가 있습니다. --retry 옵션을 사용하세요.\n` +
-            `기존 시험 ID: ${existingExam.id}, 제목: ${existingExam.title}`
-          );
-        }
-      }
-
-      // 5-2. 과목 찾기 또는 생성
+      // 5-1. 과목 찾기 또는 생성 (중복 체크를 위해 먼저 실행)
       const subject = await this.subjectsService.findOrCreateByName(subjectName);
 
-      // 5-3. 시험 엔티티 생성 및 저장
-      const exam = manager.create(Exam, {
-        subject_id: subject.id,
-        year,
-        exam_type: examType,
-        title,
-        total_questions: questions.length
+      // 5-2. 중복 체크 및 재시도 처리 (subject_id, year, exam_type 조합으로 체크)
+      const existingExam = await manager.findOne(Exam, {
+        where: {
+          subject_id: subject.id,
+          year: year,
+          exam_type: examType
+        }
       });
-      const savedExam = await manager.save(exam);
-      console.log(`  ✅ 시험 저장 완료 (ID: ${savedExam.id})`);
+
+      let savedExam: Exam;
+      
+      if (existingExam) {
+        if (forceRetry) {
+          // --retry 옵션: 기존 데이터 업데이트
+          console.log('  ⚠️  기존 시험 업데이트 중...');
+          console.log(`     ID: ${existingExam.id}, 제목: ${existingExam.title}`);
+          
+          // 기존 questions 삭제 (새로운 문제로 대체)
+          await manager.delete(Questsion, { exam_id: existingExam.id });
+          
+          // exam 정보 업데이트
+          existingExam.title = title;
+          existingExam.total_questions = questions.length;
+          savedExam = await manager.save(existingExam);
+          
+          console.log('  ✅ 업데이트 완료');
+        } else {
+          // 일반 모드: 중복 시 에러 발생
+          throw new Error(
+            `이미 동일한 시험이 존재합니다. --retry 옵션을 사용하세요.\n` +
+            `기존 시험 ID: ${existingExam.id}, 제목: ${existingExam.title}, 년도: ${existingExam.year}, 타입: ${existingExam.exam_type}`
+          );
+        }
+      } else {
+        // 5-3. 시험 엔티티 생성 및 저장 (신규)
+        const exam = manager.create(Exam, {
+          subject_id: subject.id,
+          year,
+          exam_type: examType,
+          title,
+          total_questions: questions.length
+        });
+        savedExam = await manager.save(exam);
+        console.log(`  ✅ 시험 저장 완료 (ID: ${savedExam.id})`);
+      }
 
       // 5-4. 문제 및 선택지 저장
       // 선택지는 JSONB 형식으로 questions 테이블에 함께 저장됨
