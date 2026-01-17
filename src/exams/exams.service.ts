@@ -128,7 +128,7 @@ export class ExamsService {
       const isCorrect = userAnswer !== null &&
         question.correct_answers.includes(userAnswer)
 
-      if (!isCorrect) {
+      if (isCorrect) {
         correctCount++
       }
 
