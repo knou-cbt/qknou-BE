@@ -37,12 +37,12 @@ export class ExamsService {
   ) { }
 
   /**
-   * 시험 문제 조회
+   * 시험 문제 조회 (전체)
    * @param examId - 시험 ID
-   * @param mode - 모드 (study, test)
+   * @param mode - 모드 (study: 정답 포함, test: 정답 미포함)
    */
   async findQuestions(examId: number, mode: 'study' | 'test' = 'test') {
-    //1.시험 정보 조회
+    //1. 시험 정보 조회
     const exam = await this.examRepository.findOne({
       where: { id: examId },
       relations: ['subject'] 
@@ -51,14 +51,17 @@ export class ExamsService {
     if (!exam) {
       throw new NotFoundException(`시험 id ${examId}를 찾을 수 없습니다.`)
     }
-    //2.문제 조회
+
+    //2. 문제 조회 (전체)
     const questions = await this.questionRepository.find({
       where: { exam_id: examId },
-      order: {question_number: 'ASC'}
+      order: { question_number: 'ASC' }
     })
+    
     if (questions.length === 0) {
       throw new NotFoundException(`시험 id ${examId}에 문제가 없습니다.`)
     }
+
     const isStudyMode = mode === 'study'
 
     //3. 응답 형식으로 변환
@@ -67,7 +70,7 @@ export class ExamsService {
         id: exam.id,
         title: exam.title,
         subject: exam.subject.name,
-        totalQuesetions: exam.total_questions,
+        totalQuestions: exam.total_questions,
       },
       questions: questions.map(question => {
         const questionData: any = {

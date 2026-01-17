@@ -9,6 +9,9 @@ export class ExamsController {
 
   /**
    * GET /api/exams/:id/questions
+   * 시험의 전체 문제 조회
+   * 
+   * @param mode - study: 정답 포함 | test: 정답 미포함 (기본값)
    */
   @Get(':id/questions')
   async findQuestions(
