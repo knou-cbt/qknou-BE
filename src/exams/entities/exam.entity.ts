@@ -22,14 +22,14 @@ export class Exam{
   @Column({ type: 'int', nullable: false })
   total_questions: number;
 
-  @CreateDateColumn({type: 'timestamp'})
+  @CreateDateColumn({type: 'timestamptz'})
   created_at: Date
 
   //여러 시험이 하나의 과목에 속함
-  @ManyToOne(() => Subject )
+  @ManyToOne(() => Subject, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'subject_id' }) //외래키 컬럼명 지정
   subject: Subject;
   
-  @OneToMany(() => Questsion, (question) => question.exam)
+  @OneToMany(() => Questsion, (question) => question.exam, { cascade: true })
   questions: Questsion[]
 }

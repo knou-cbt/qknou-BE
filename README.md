@@ -24,7 +24,14 @@
 
 ## Description
 
+방송대 기출문제 크롤링 및 관리 시스템
+
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+
+## 📚 Documentation
+
+- [크롤링 가이드](./CRAWLING_GUIDE.md)
+- [성능 벤치마크](./BENCHMARK.md) - JSONB vs 별도 테이블 비교
 
 ## Project setup
 
@@ -56,6 +63,19 @@ $ yarn run test:e2e
 
 # test coverage
 $ yarn run test:cov
+
+# benchmark (SELECT 성능 측정)
+$ yarn run benchmark
+```
+
+## Crawling
+
+```bash
+# 시험 크롤링
+$ yarn crawl <URL>
+
+# 재시도 (기존 데이터 삭제 후 재크롤링)
+$ yarn crawl <URL> --retry
 ```
 
 ## Deployment

@@ -1,6 +1,5 @@
-import { Choice } from "src/choices/entities/choice.entity";
 import { Exam } from "src/exams/entities/exam.entity";
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 
 @Entity('questions')
 export class Questsion{
@@ -17,18 +16,25 @@ export class Questsion{
   question_text: string;
 
   @Column({type:'text', nullable: true})
+  example_text: string;
+
+  @Column({type:'text', nullable: true})
   question_image_url: string;
 
-  @Column({type:'int', nullable: false})
-  correct_answer: number;
+  @Column({type:'jsonb', nullable: false})
+  correct_answers: number[];
 
-  @CreateDateColumn({type: 'timestamp'})
+  @Column({type:'jsonb', nullable: false})
+  choices: Array<{
+    number: number;
+    text: string;
+    imageUrl: string | null;
+  }>;
+
+  @CreateDateColumn({type: 'timestamptz'})
   created_at: Date;
 
-  @ManyToOne(() => Exam)
+  @ManyToOne(() => Exam, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'exam_id' })
   exam: Exam;
-
-  @OneToMany(() => Choice, (choice) => choice.question)
-  choices: Choice[]
 }

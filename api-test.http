@@ -1,0 +1,133 @@
+### REST Client API 테스트 파일
+### 각 요청 위의 "Send Request" 버튼을 클릭하거나 Ctrl+Alt+R (Mac: Cmd+Alt+R)로 실행
+
+@baseUrl = http://localhost:3000
+@contentType = application/json
+
+### ============================================
+### Subjects API
+### ============================================
+
+### 1. 과목 목록 조회 (전체)
+GET {{baseUrl}}/api/subjects
+
+### 2. 과목 목록 조회 (검색)
+GET {{baseUrl}}/api/subjects?search=경영
+
+### 3. 과목 목록 조회 (페이지네이션)
+GET {{baseUrl}}/api/subjects?page=1&limit=5
+
+### 4. 과목 목록 조회 (검색 + 페이지네이션)
+GET {{baseUrl}}/api/subjects?search=경영&page=1&limit=10
+
+### 5. 특정 과목 상세 조회
+GET {{baseUrl}}/api/subjects/1
+
+### 6. 존재하지 않는 과목 조회 (404 테스트)
+GET {{baseUrl}}/api/subjects/99999
+
+### ============================================
+### Exams API
+### ============================================
+
+### 7. 특정 과목의 시험지 목록 조회
+GET {{baseUrl}}/api/subjects/2/exams
+
+### 8. 특정 과목의 시험지 목록 조회 (존재하지 않는 과목)
+GET {{baseUrl}}/api/subjects/99999/exams
+
+### 9. 시험 문제 조회 (study 모드 - 정답 포함)
+GET {{baseUrl}}/api/exams/1/questions?mode=study
+
+### 10. 시험 문제 조회 (test 모드 - 정답 미포함, 기본값)
+GET {{baseUrl}}/api/exams/1/questions?mode=study
+
+### 11. 시험 문제 조회 (mode 생략 - 기본값 test)
+GET {{baseUrl}}/api/exams/1/questions
+
+### 12. 존재하지 않는 시험 문제 조회 (404 테스트)
+GET {{baseUrl}}/api/exams/99999/questions
+
+### 13. 시험 답안 제출 (정상 케이스)
+POST {{baseUrl}}/api/exams/1/submit
+Content-Type: {{contentType}}
+
+{
+  "answers": [
+    {
+      "questionId": 1,
+      "selectedAnswer": 2
+    },
+    {
+      "questionId": 2,
+      "selectedAnswer": 1
+    },
+    {
+      "questionId": 3,
+      "selectedAnswer": 4
+    }
+  ]
+}
+
+### 14. 시험 답안 제출 (일부 문제만 제출)
+POST {{baseUrl}}/api/exams/2/submit
+Content-Type: {{contentType}}
+
+{
+  "answers": [
+    {
+      "questionId": 1,
+      "selectedAnswer": 1
+    }
+  ]
+}
+
+### 15. 시험 답안 제출 (빈 배열 - 400 에러 테스트)
+POST {{baseUrl}}/api/exams/1/submit
+Content-Type: {{contentType}}
+
+{
+  "answers": []
+}
+
+### 16. 시험 답안 제출 (잘못된 형식 - selectedAnswer 범위 초과)
+POST {{baseUrl}}/api/exams/1/submit
+Content-Type: {{contentType}}
+
+{
+  "answers": [
+    {
+      "questionId": 1,
+      "selectedAnswer": 5
+    }
+  ]
+}
+
+### 17. 존재하지 않는 시험 답안 제출 (404 테스트)
+POST {{baseUrl}}/api/exams/99999/submit
+Content-Type: {{contentType}}
+
+{
+  "answers": [
+    {
+      "questionId": 1,
+      "selectedAnswer": 1
+    }
+  ]
+}
+
+### ============================================
+### Departments API
+### ============================================
+
+### 18. 학과 목록 조회 (전체)
+GET {{baseUrl}}/api/departments
+
+### 19. 특정 학과의 과목 목록 조회
+GET {{baseUrl}}/api/departments/1/subjects
+
+### 20. 특정 학과의 과목 목록 조회 (다른 학과)
+GET {{baseUrl}}/api/departments/2/subjects
+
+### 21. 존재하지 않는 학과의 과목 목록 조회 (404 테스트)
+GET {{baseUrl}}/api/departments/99999/subjects

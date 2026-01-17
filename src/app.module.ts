@@ -6,7 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SubjectsModule } from './subjects/subjects.module';
 import { ExamsModule } from './exams/exams.module';
 import { QuestionsModule } from './questions/questions.module';
-import { ChoicesModule } from './choices/choices.module';
+import { DepartmentsModule } from './departments/departments.module';
 
 // DATABASE_URL의 비밀번호 부분을 URL 인코딩하는 함수
 function encodePasswordInUrl(url: string): string {
@@ -45,6 +45,7 @@ function encodePasswordInUrl(url: string): string {
           url: encodedUrl,
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           synchronize: true, // 기존 데이터와 충돌을 피하기 위해 비활성화
+          timezone: 'Asia/Seoul', // 한국 시간대 설정
           ssl: {
             rejectUnauthorized: false,  
         },
@@ -60,7 +61,7 @@ function encodePasswordInUrl(url: string): string {
     SubjectsModule,
     ExamsModule,
     QuestionsModule,
-    ChoicesModule,
+    DepartmentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
