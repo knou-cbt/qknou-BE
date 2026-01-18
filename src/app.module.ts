@@ -40,7 +40,15 @@ function encodePasswordInUrl(url: string): string {
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
         const databaseUrl = configService.get('DATABASE_URL');
+        const nodeEnv = configService.get('NODE_ENV');
+        const synchronize = nodeEnv !== 'production';
         
+        // 디버깅 로그
+        console.log('=== TypeORM 설정 확인 ===');
+        console.log('NODE_ENV:', nodeEnv);
+        console.log('synchronize:', synchronize);
+        console.log('======================');
+
         // URL의 비밀번호 부분을 인코딩
         const encodedUrl = databaseUrl ? encodePasswordInUrl(databaseUrl) : '';
         
@@ -48,7 +56,7 @@ function encodePasswordInUrl(url: string): string {
           type: 'postgres',
           url: encodedUrl,
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
-          synchronize: configService.get('NODE_ENV') !== 'production', // 프로덕션에서는 false
+          synchronize: synchronize, // 프로덕션에서는 false
           timezone: 'Asia/Seoul', // 한국 시간대 설정
           ssl: {
             rejectUnauthorized: false,  
