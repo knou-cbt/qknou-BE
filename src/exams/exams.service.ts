@@ -8,11 +8,11 @@ import * as cheerio from 'cheerio';
 import { Subject } from 'rxjs';
 import { InjectRepository } from '@nestjs/typeorm';
 
-/**
- * 복수 정답 매핑 테이블
- * 방송대 시험에서 사용하는 복수 정답 표기(A~K)를 실제 선택지 번호 배열로 변환
- * 예: 'A' = [1, 2] (1번과 2번 모두 정답)
- */
+// /**
+//  * 복수 정답 매핑 테이블
+//  * 방송대 시험에서 사용하는 복수 정답 표기(A~K)를 실제 선택지 번호 배열로 변환
+//  * 예: 'A' = [1, 2] (1번과 2번 모두 정답)
+//  */
 const MULTIPLE_ANSWER_MAP: Record<string, number[]> = {
   'A': [1, 2], 'B': [1, 3], 'C': [1, 4], 'D': [2, 3],
   'E': [2, 4], 'F': [3, 4], 'G': [1, 2, 3], 'H': [1, 2, 4],
