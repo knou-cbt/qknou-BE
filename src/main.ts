@@ -9,7 +9,7 @@ async function bootstrap() {
   
   // CORS 설정
   app.enableCors({
-    origin: 'https://www.qknou.kr',
+    origin: ['http://localhost:3000', 'https://localhost:3000', 'http://localhost:3001', 'https://www.qknou.kr'], // localhost (http/https) + 운영 도메인 허용
     credentials: true,
   });
   
