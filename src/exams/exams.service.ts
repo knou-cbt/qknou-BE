@@ -136,7 +136,7 @@ export class ExamsService {
         questionId: question.id,
         questionNumber: question.question_number,
         userAnswer,
-        correctAnswer: question.correct_answers,
+        correctAnswers: question.correct_answers,
         isCorrect,
       }
     })
