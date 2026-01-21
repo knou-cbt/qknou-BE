@@ -13,7 +13,7 @@ async function benchmark() {
     const questionsService = app.get(QuestionsService);
     
     // 테스트할 exam_id (첫 번째 시험)
-    const examId = 1;
+    const examId = 4;
     
     // 웜업 (캐시 워밍)
     console.log('🔥 웜업 중...');

@@ -82,9 +82,10 @@ export class ExamsService {
           choices: question.choices,
         };
         
-        //study 모드일때만 정답 포함 
+        //study 모드일때만 정답 및 해설 포함 
         if (isStudyMode) {
           questionData.correctAnswers = question.correct_answers;
+          questionData.explanation = question.explanation;
         }
         
         return questionData;
@@ -136,7 +137,7 @@ export class ExamsService {
         questionId: question.id,
         questionNumber: question.question_number,
         userAnswer,
-        correctAnswer: question.correct_answers,
+        correctAnswers: question.correct_answers,
         isCorrect,
       }
     })
