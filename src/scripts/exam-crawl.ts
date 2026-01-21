@@ -1,56 +1,73 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
-import { ExamsService } from '../exams/exams.service';
+import { CrawlerService } from '../crawlers/crawler.service';
 
-// 한국 시간대 설정
 process.env.TZ = 'Asia/Seoul';
 
 async function bootstrap() {
-  // 명령줄 인자 파싱
-  const url = process.argv[2];
-  const forceRetry = process.argv.includes('--retry') || process.argv.includes('-r');
+  const args = process.argv.slice(2);
+  const url = args[0];
+  const mode = args.includes('--all') ? 'all' : 'single';
+  const forceRetry = args.includes('--retry') || args.includes('-r');
+  const delayArg = args.find(arg => arg.startsWith('--delay='));
+  const delay = delayArg ? parseInt(delayArg.split('=')[1]) : 1000;
   
-  //url 없으면 사용법 출력하고 종료
   if (!url) {
-    console.error('사용법: yarn crawl <URL> [--retry]');
-    console.error('예시: yarn crawl https://크롤링사이트/855');
-    console.error('     yarn crawl https://크롤링사이트/855 --retry  (부분 저장된 경우 재시도)');
+    console.error('사용법:');
+    console.error('  단일 크롤링: yarn crawl <URL> [--retry]');
+    console.error('  전체 크롤링: yarn crawl <메인URL> --all [--retry] [--delay=1000]');
+    console.error('');
+    console.error('예시:');
+    console.error('  yarn crawl https://allaclass.tistory.com/855');
+    console.error('  yarn crawl https://allaclass.tistory.com/2365 --all --delay=2000');
     process.exit(1);
   }
 
-  // NestJS 애플리케이션 컨텍스트 생성 (서버는 띄우지 않음)
   console.log('NestJS 애플리케이션 초기화 중...');
   const app = await NestFactory.createApplicationContext(AppModule);
 
   try {
-    console.log(`🔍 크롤링 시작: ${url}`);
-    if (forceRetry) {
-      console.log('⚠️ --retry 옵션 활성화: 부분 저장된 데이터가 있으면 삭제하고 다시 시도합니다.');
+    const crawler = app.get(CrawlerService);
+
+    if (mode === 'all') {
+      console.log(`🔍 전체 크롤링 시작: ${url}`);
+      console.log(`⏱️  딜레이: ${delay}ms`);
+      if (forceRetry) {
+        console.log('⚠️  --retry 활성화');
+      }
+      console.log('');
+      
+      await crawler.crawlAll(url, { forceRetry, delay });
+    } else {
+      console.log(`🔍 단일 크롤링 시작: ${url}`);
+      if (forceRetry) {
+        console.log('⚠️  --retry 활성화');
+      }
+      console.log('');
+      
+      const result = await crawler.crawlExam(url, forceRetry);
+      
+      console.log('');
+      console.log('✅ 크롤링 완료!');
+      console.log(`   - 시험 ID: ${result.examId}`);
+      console.log(`   - 제목: ${result.title}`);
+      console.log(`   - 저장된 문제 수: ${result.questionCount}`);
+      if (result.totalQuestions) {
+        console.log(`   - 전체 문제 수: ${result.totalQuestions}`);
+      }
+      if (result.skippedQuestions && result.skippedQuestions.length > 0) {
+        console.log('');
+        console.log('⚠️  건너뛴 문제:');
+        console.log(`   - 개수: ${result.skippedQuestions.length}개`);
+        console.log(`   - 문제 번호: ${result.skippedQuestions.join(', ')}`);
+        console.log('   💡 정답표와 문제 번호가 일치하지 않을 수 있습니다. 수동 확인이 필요합니다.');
+      }
     }
-    console.log('');
-
-    // ExamsService를 DI 컨테이너에서 가져오기
-    const examsService = app.get(ExamsService);
-
-    // 크롤링 실행
-    const result = await examsService.saveExamFromUrl(url, forceRetry);
-
-    console.log('');
-    console.log('✅ 크롤링 완료!');
-    console.log(`   - 시험 ID: ${result.examId}`);
-    console.log(`   - 제목: ${result.title}`);
-    console.log(`   - 문제 수: ${result.questionCount}`);
   } catch (error: any) {
     console.log('');
     console.error('❌ 크롤링 실패:', error.message);
-    if (error.message.includes('부분적으로 저장된')) {
-      console.error('');
-      console.error('💡 해결 방법: --retry 옵션을 사용하여 다시 시도하세요.');
-      console.error('   예시: yarn crawl ' + url + ' --retry');
-    }
     process.exit(1);
   } finally {
-    // NestJS 앱 종료 (TypeORM 연결도 자동으로 닫힘)
     await app.close();
   }
 }

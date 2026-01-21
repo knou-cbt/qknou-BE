@@ -31,6 +31,9 @@ export class Questsion{
     imageUrl: string | null;
   }>;
 
+  @Column({type:'text', nullable: true})
+  explanation: string;
+
   @CreateDateColumn({type: 'timestamptz'})
   created_at: Date;
 

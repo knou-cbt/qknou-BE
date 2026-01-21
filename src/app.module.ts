@@ -7,6 +7,7 @@ import { SubjectsModule } from './subjects/subjects.module';
 import { ExamsModule } from './exams/exams.module';
 import { QuestionsModule } from './questions/questions.module';
 import { DepartmentsModule } from './departments/departments.module';
+import { CrawlersModule } from './crawlers/crawlers.module';
 
 // DATABASE_URL의 비밀번호 부분을 URL 인코딩하는 함수
 function encodePasswordInUrl(url: string): string {
@@ -74,6 +75,7 @@ function encodePasswordInUrl(url: string): string {
     ExamsModule,
     QuestionsModule,
     DepartmentsModule,
+    CrawlersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
