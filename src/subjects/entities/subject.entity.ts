@@ -1,8 +1,9 @@
 import { Department } from "src/departments/entities/department.entity";
 import { Exam } from "src/exams/entities/exam.entity";
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from "typeorm";
 
 @Entity('subjects')
+@Index('IDX_subjects_name', ['name'])
 export class Subject{
   @PrimaryGeneratedColumn()
   id: number;

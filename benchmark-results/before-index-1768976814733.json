@@ -1,0 +1,84 @@
+{
+  "timestamp": "2026-01-21T06:25:16.934Z",
+  "phase": "BEFORE_INDEX",
+  "tests": [
+    {
+      "name": "questions_by_exam_id",
+      "query": "SELECT * FROM questions WHERE exam_id = 1",
+      "plan": "Index Scan using \"IDX_questions_exam_id\" on questions  (cost=0.29..5.13 rows=36 width=1088) (actual time=0.008..0.021 rows=35 loops=1)\n  Index Cond: (exam_id = 1)\nPlanning Time: 3.223 ms\nExecution Time: 0.046 ms",
+      "scanType": "INDEX_SCAN"
+    },
+    {
+      "name": "exams_by_subject_id",
+      "query": "SELECT * FROM exams WHERE subject_id = 1",
+      "plan": "Index Scan using \"IDX_exams_subject_id\" on exams  (cost=0.28..2.62 rows=8 width=45) (actual time=0.008..0.010 rows=7 loops=1)\n  Index Cond: (subject_id = 1)\nPlanning Time: 0.177 ms\nExecution Time: 0.031 ms",
+      "scanType": "INDEX_SCAN"
+    },
+    {
+      "name": "subjects_like_search",
+      "query": "SELECT * FROM subjects WHERE name LIKE '컴퓨터%'",
+      "plan": "Seq Scan on subjects  (cost=0.00..11.74 rows=1 width=35) (actual time=0.060..0.068 rows=2 loops=1)\n  Filter: ((name)::text ~~ '컴퓨터%'::text)\n  Rows Removed by Filter: 537\nPlanning Time: 0.092 ms\nExecution Time: 0.084 ms",
+      "scanType": "SEQ_SCAN"
+    },
+    {
+      "name": "exams_by_year_and_type",
+      "query": "SELECT * FROM exams WHERE year = 2024 AND exam_type = 1",
+      "plan": "Index Scan using \"IDX_exams_year_exam_type\" on exams  (cost=0.28..2.48 rows=1 width=45) (actual time=0.006..0.007 rows=0 loops=1)\n  Index Cond: ((year = 2024) AND (exam_type = 1))\nPlanning Time: 0.094 ms\nExecution Time: 0.025 ms",
+      "scanType": "INDEX_SCAN"
+    }
+  ],
+  "indexes": [
+    {
+      "tablename": "exams",
+      "indexname": "IDX_exams_subject_id",
+      "indexdef": "CREATE INDEX \"IDX_exams_subject_id\" ON public.exams USING btree (subject_id)"
+    },
+    {
+      "tablename": "exams",
+      "indexname": "IDX_exams_year_exam_type",
+      "indexdef": "CREATE INDEX \"IDX_exams_year_exam_type\" ON public.exams USING btree (year, exam_type)"
+    },
+    {
+      "tablename": "exams",
+      "indexname": "PK_b43159ee3efa440952794b4f53e",
+      "indexdef": "CREATE UNIQUE INDEX \"PK_b43159ee3efa440952794b4f53e\" ON public.exams USING btree (id)"
+    },
+    {
+      "tablename": "questions",
+      "indexname": "IDX_questions_exam_id",
+      "indexdef": "CREATE INDEX \"IDX_questions_exam_id\" ON public.questions USING btree (exam_id)"
+    },
+    {
+      "tablename": "questions",
+      "indexname": "PK_08a6d4b0f49ff300bf3a0ca60ac",
+      "indexdef": "CREATE UNIQUE INDEX \"PK_08a6d4b0f49ff300bf3a0ca60ac\" ON public.questions USING btree (id)"
+    },
+    {
+      "tablename": "subjects",
+      "indexname": "IDX_subjects_name",
+      "indexdef": "CREATE INDEX \"IDX_subjects_name\" ON public.subjects USING btree (name)"
+    },
+    {
+      "tablename": "subjects",
+      "indexname": "PK_1a023685ac2b051b4e557b0b280",
+      "indexdef": "CREATE UNIQUE INDEX \"PK_1a023685ac2b051b4e557b0b280\" ON public.subjects USING btree (id)"
+    }
+  ],
+  "dataCounts": {
+    "subjects": "539",
+    "exams": "3191",
+    "questions": "106495"
+  },
+  "typeorm": {
+    "questions": {
+      "avg": 383.78424500000017,
+      "p50": 239.0158999999985,
+      "p95": 951.6069999999963
+    },
+    "exams": {
+      "avg": 558.2376860000007,
+      "p50": 475.13230000000476,
+      "p95": 1245.2190999999875
+    }
+  }
+}

@@ -83,7 +83,7 @@ Content-Type: {{contentType}}
 }
 
 ### 15. 시험 답안 제출 (빈 배열 - 400 에러 테스트)
-POST {{baseUrl}}/api/exams/1/submit
+POST {{baseUrl}}/api/exams/25/questions?mode=test
 Content-Type: {{contentType}}
 
 {
@@ -91,7 +91,7 @@ Content-Type: {{contentType}}
 }
 
 ### 16. 시험 답안 제출 (잘못된 형식 - selectedAnswer 범위 초과)
-POST {{baseUrl}}/api/exams/1/submit
+POST {{baseUrl}}/api/exams/25/questions?mode=test
 Content-Type: {{contentType}}
 
 {
