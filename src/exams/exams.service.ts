@@ -37,11 +37,18 @@ export class ExamsService {
   ) { }
 
   /**
-   * 시험 문제 조회 (전체)
+   * 시험 문제 조회 (페이지네이션 지원)
    * @param examId - 시험 ID
    * @param mode - 모드 (study: 정답 포함, test: 정답 미포함)
+   * @param page - 페이지 번호 (1부터 시작, 선택사항)
+   * @param limit - 페이지당 문제 수 (선택사항)
    */
-  async findQuestions(examId: number, mode: 'study' | 'test' = 'test') {
+  async findQuestions(
+    examId: number, 
+    mode: 'study' | 'test' = 'test',
+    page?: number,
+    limit?: number
+  ) {
     //1. 시험 정보 조회 (필요한 필드만 선택 + subject.name만 JOIN)
     const exam = await this.examRepository
       .createQueryBuilder('exam')
@@ -72,19 +79,27 @@ export class ExamsService {
       selectFields.push('question.correct_answers', 'question.explanation');
     }
     
-    const questions = await this.questionRepository
+    // QueryBuilder 생성
+    let queryBuilder = this.questionRepository
       .createQueryBuilder('question')
       .select(selectFields)
       .where('question.exam_id = :examId', { examId })
-      .orderBy('question.question_number', 'ASC')
-      .getMany();
+      .orderBy('question.question_number', 'ASC');
+    
+    // 페이지네이션 적용 (page와 limit이 모두 제공된 경우에만)
+    if (page && limit) {
+      const skip = (page - 1) * limit;
+      queryBuilder = queryBuilder.skip(skip).take(limit);
+    }
+    
+    const questions = await queryBuilder.getMany();
     
     if (questions.length === 0) {
       throw new NotFoundException(`시험 id ${examId}에 문제가 없습니다.`)
     }
 
     //3. 응답 형식으로 변환
-    return {
+    const response: any = {
       exam: {
         id: exam.id,
         title: exam.title,
@@ -110,6 +125,20 @@ export class ExamsService {
         return questionData;
       })
     };
+
+    // 페이지네이션 정보 추가 (page와 limit이 제공된 경우)
+    if (page && limit) {
+      response.pagination = {
+        page,
+        limit,
+        total: exam.total_questions,
+        totalPages: Math.ceil(exam.total_questions / limit),
+        hasNext: page * limit < exam.total_questions,
+        hasPrev: page > 1
+      };
+    }
+
+    return response;
   }
    
   /**
@@ -119,18 +148,21 @@ export class ExamsService {
     examId: number,
     answers: {questionId: number, selectedAnswer: number}[]
   ) {
-    //1. 시험 정보 조회
+    //1. 시험 정보 조회 (필요한 필드만)
     const exam = await this.examRepository.findOne({
-      where: {id: examId}
+      where: {id: examId},
+      select: ['id', 'total_questions']
     })
     if (!exam) {
       throw new NotFoundException(`시험 id ${examId}를 찾을 수 없습니다.`)
     }
-    //2.문제 조회
-    const questions = await this.questionRepository.find({
-      where: { exam_id: examId },
-      order: {question_number: 'ASC'}
-    })
+    //2. 문제 조회 (채점에 필요한 필드만: id, question_number, correct_answers)
+    const questions = await this.questionRepository
+      .createQueryBuilder('question')
+      .select(['question.id', 'question.question_number', 'question.correct_answers'])
+      .where('question.exam_id = :examId', { examId })
+      .orderBy('question.question_number', 'ASC')
+      .getMany();
 
     //3.사용자가 제출한 답안을 Map으로 변환
     const answerMap = new Map(
@@ -142,7 +174,7 @@ export class ExamsService {
     const results = questions.map(question => {
       //사용자 답안 가져오기
       const userAnswer = answerMap.get(question.id) || null
-      console.log("userAnswer(문제에 대한 답) >> ", userAnswer);
+      // console.log("userAnswer(문제에 대한 답) >> ", userAnswer);
       
       //복수 정답 처리: 사용자 답안이 정답 배열에 포함되어 있으면 정답
       const isCorrect = userAnswer !== null &&
