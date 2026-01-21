@@ -1,7 +1,8 @@
 import { Exam } from "src/exams/entities/exam.entity";
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 
 @Entity('questions')
+@Index('IDX_questions_exam_id', ['exam_id'])
 export class Questsion{
   @PrimaryGeneratedColumn()
   id: number;
@@ -30,6 +31,9 @@ export class Questsion{
     text: string;
     imageUrl: string | null;
   }>;
+
+  @Column({type:'text', nullable: true})
+  explanation: string;
 
   @CreateDateColumn({type: 'timestamptz'})
   created_at: Date;
