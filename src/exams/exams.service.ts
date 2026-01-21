@@ -42,27 +42,46 @@ export class ExamsService {
    * @param mode - 모드 (study: 정답 포함, test: 정답 미포함)
    */
   async findQuestions(examId: number, mode: 'study' | 'test' = 'test') {
-    //1. 시험 정보 조회
-    const exam = await this.examRepository.findOne({
-      where: { id: examId },
-      relations: ['subject'] 
-    })
+    //1. 시험 정보 조회 (필요한 필드만 선택 + subject.name만 JOIN)
+    const exam = await this.examRepository
+      .createQueryBuilder('exam')
+      .select(['exam.id', 'exam.title', 'exam.total_questions'])
+      .addSelect('subject.name')
+      .leftJoin('exam.subject', 'subject')
+      .where('exam.id = :examId', { examId })
+      .getOne();
     
     if (!exam) {
       throw new NotFoundException(`시험 id ${examId}를 찾을 수 없습니다.`)
     }
 
-    //2. 문제 조회 (전체)
-    const questions = await this.questionRepository.find({
-      where: { exam_id: examId },
-      order: { question_number: 'ASC' }
-    })
+    //2. 문제 조회 (mode에 따라 필요한 필드만 선택)
+    const isStudyMode = mode === 'study';
+    
+    const selectFields: string[] = [
+      'question.id',
+      'question.question_number',
+      'question.question_text',
+      'question.example_text',
+      'question.question_image_url',
+      'question.choices'
+    ];
+    
+    // study 모드일 때만 정답/해설 필드 추가
+    if (isStudyMode) {
+      selectFields.push('question.correct_answers', 'question.explanation');
+    }
+    
+    const questions = await this.questionRepository
+      .createQueryBuilder('question')
+      .select(selectFields)
+      .where('question.exam_id = :examId', { examId })
+      .orderBy('question.question_number', 'ASC')
+      .getMany();
     
     if (questions.length === 0) {
       throw new NotFoundException(`시험 id ${examId}에 문제가 없습니다.`)
     }
-
-    const isStudyMode = mode === 'study'
 
     //3. 응답 형식으로 변환
     return {
