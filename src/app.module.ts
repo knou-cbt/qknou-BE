@@ -59,6 +59,7 @@ function encodePasswordInUrl(url: string): string {
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           synchronize: synchronize, // 프로덕션에서는 false
           timezone: 'Asia/Seoul', // 한국 시간대 설정
+          logging: false, // 로깅 비활성화
           ssl: {
             rejectUnauthorized: false,  
         },
@@ -66,6 +67,11 @@ function encodePasswordInUrl(url: string): string {
             ssl: {
               rejectUnauthorized: false,
             },
+            // Connection Pool 최적화
+            max: 20,              // 최대 연결 수
+            min: 5,               // 최소 유지 연결 수
+            idleTimeoutMillis: 30000,  // 유휴 연결 타임아웃 (30초)
+            connectionTimeoutMillis: 2000,  // 연결 대기 타임아웃 (2초)
           },
         };
       },
