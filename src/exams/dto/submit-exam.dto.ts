@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsArray, IsNumber, Max, Min, ValidateNested } from "class-validator";
+import { IsArray, IsNumber, Max, Min, ValidateNested, IsOptional, ValidateIf } from "class-validator";
 import { ApiProperty } from "@nestjs/swagger";
 
 class AnswerDto{
@@ -12,16 +12,19 @@ class AnswerDto{
   questionId: number;
 
   @ApiProperty({ 
-    description: '선택한 답안 번호 (1~4)',
+    description: '선택한 답안 번호 (1~4), 미선택 시 null',
     example: 2,
     minimum: 1,
     maximum: 4,
-    type: Number
+    type: Number,
+    nullable: true
   })
+  @IsOptional()
+  @ValidateIf((o) => o.selectedAnswer !== null && o.selectedAnswer !== undefined)
   @IsNumber()
   @Min(1)
   @Max(4) //선택지 번호 (1~4)
-  selectedAnswer: number;
+  selectedAnswer: number | null;
 }
 
 export class SubmitExamDto{
