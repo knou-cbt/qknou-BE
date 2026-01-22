@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Like, Repository } from 'typeorm';
 import { Subject } from './entities/subject.entity';
@@ -9,7 +9,7 @@ import { Exam } from 'src/exams/entities/exam.entity';
  * 과목의 조회, 생성 등의 기능을 제공합니다.
  */
 @Injectable()
-export class SubjectsService {
+export class SubjectsService implements OnModuleInit {
   // 전체 과목 수 캐시 (과목은 거의 변하지 않으므로 캐싱)
   private totalSubjectsCache: number | null = null;
 
@@ -19,6 +19,34 @@ export class SubjectsService {
     @InjectRepository(Exam)
     private examRepository: Repository<Exam>
   ) {}
+
+  /**
+   * 모듈 초기화 시 캐시 예열 (Cache Warming)
+   * 서버 시작 시 자동으로 전체 과목 수를 캐싱하여
+   * 첫 번째 사용자도 빠른 응답을 받을 수 있도록 함
+   */
+  async onModuleInit() {
+    await this.warmupCache();
+  }
+
+  /**
+   * 캐시 예열 메서드
+   * 전체 과목 수를 미리 계산하여 캐시에 저장
+   */
+  private async warmupCache() {
+    try {
+      console.log('📊 [SubjectsService] 캐시 예열 시작...');
+      const start = Date.now();
+      
+      this.totalSubjectsCache = await this.subjectRepository.count();
+      
+      const duration = Date.now() - start;
+      console.log(`✅ [SubjectsService] 전체 과목 수: ${this.totalSubjectsCache}개 캐시 완료 (${duration}ms)`);
+    } catch (error) {
+      console.error('❌ [SubjectsService] 캐시 예열 실패:', error.message);
+      // 캐시 예열 실패해도 서버는 계속 실행 (첫 요청 시 캐싱됨)
+    }
+  }
 
   /**
    * 과목 이름으로 조회하고, 없으면 새로 생성합니다.
@@ -76,12 +104,13 @@ export class SubjectsService {
       });
     } else {
       // 검색어가 없으면 캐시된 total 사용
-      subjects = await this.subjectRepository.find({
-        where,
-        skip,
-        take: limit,
-        order: { name: 'ASC'}
-      });
+      subjects = await this.subjectRepository
+        .createQueryBuilder('subject')
+        .select(['subject.id', 'subject.name'])
+        .orderBy('subject.name', 'ASC')
+        .skip(skip)
+        .take(limit)
+        .getMany();
       total = this.totalSubjectsCache!;
     }
 

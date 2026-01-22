@@ -8,6 +8,7 @@ import { ExamsModule } from './exams/exams.module';
 import { QuestionsModule } from './questions/questions.module';
 import { DepartmentsModule } from './departments/departments.module';
 import { CrawlersModule } from './crawlers/crawlers.module';
+import { HealthModule } from './health/health.module';
 
 // DATABASE_URL의 비밀번호 부분을 URL 인코딩하는 함수
 function encodePasswordInUrl(url: string): string {
@@ -60,9 +61,7 @@ function encodePasswordInUrl(url: string): string {
           synchronize: synchronize, // 프로덕션에서는 false
           timezone: 'Asia/Seoul', // 한국 시간대 설정
           logging: false, // 로깅 비활성화
-          ssl: {
-            rejectUnauthorized: false,  
-        },
+          ssl: nodeEnv === 'production' ? { rejectUnauthorized: false } : false,
           extra: {
             ssl: {
               rejectUnauthorized: false,
@@ -71,7 +70,7 @@ function encodePasswordInUrl(url: string): string {
             max: 20,              // 최대 연결 수
             min: 5,               // 최소 유지 연결 수
             idleTimeoutMillis: 30000,  // 유휴 연결 타임아웃 (30초)
-            connectionTimeoutMillis: 2000,  // 연결 대기 타임아웃 (2초)
+            connectionTimeoutMillis: 10000,  // 연결 대기 타임아웃 (10초)
           },
         };
       },
@@ -82,6 +81,7 @@ function encodePasswordInUrl(url: string): string {
     QuestionsModule,
     DepartmentsModule,
     CrawlersModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
