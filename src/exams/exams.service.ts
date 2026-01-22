@@ -147,7 +147,7 @@ export class ExamsService {
    */
   async submitExam(
     examId: number,
-    answers: {questionId: number, selectedAnswer: number}[]
+    answers: {questionId: number, selectedAnswer: number | null}[]
   ) {
     //1. 시험 정보 조회 (필요한 필드만)
     const exam = await this.examRepository.findOne({
