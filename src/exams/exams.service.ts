@@ -52,7 +52,7 @@ export class ExamsService {
     //1. 시험 정보 조회 (필요한 필드만 선택 + subject.name만 JOIN)
     const exam = await this.examRepository
       .createQueryBuilder('exam')
-      .select(['exam.id', 'exam.title', 'exam.total_questions'])
+      .select(['exam.id', 'exam.title', 'exam.total_questions', 'exam.year'])
       .addSelect('subject.name')
       .leftJoin('exam.subject', 'subject')
       .where('exam.id = :examId', { examId })
@@ -105,6 +105,7 @@ export class ExamsService {
         title: exam.title,
         subject: exam.subject.name,
         totalQuestions: exam.total_questions,
+        year: exam.year,
       },
       questions: questions.map(question => {
         const questionData: any = {
