@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-01-21T15:34:05.679Z",
+  "optimizationStep": "unknown",
+  "test": "subjects_only",
+  "tests": [
+    {
+      "name": "subjects_findAll",
+      "description": "SubjectsService.findAll()",
+      "iterations": 100,
+      "avg": 554.190929,
+      "p50": 372.2393000000011,
+      "p95": 1420.1401000000005,
+      "min": 134.1704000000027,
+      "max": 2064.387999999999
+    },
+    {
+      "name": "subjects_findAll_search",
+      "description": "SubjectsService.findAll(\"컴퓨터\")",
+      "iterations": 100,
+      "avg": 293.6726369999992,
+      "p50": 236.90869999999995,
+      "p95": 588.079700000002,
+      "min": 135.32159999999567,
+      "max": 771.0950000000012
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-01-21T15:43:56.348Z",
+  "optimizationStep": "pagination",
+  "tests": [
+    {
+      "name": "pagination_5",
+      "description": "findQuestions(1, \"test\", 1, 5) - 5개",
+      "iterations": 100,
+      "questionCount": 5,
+      "avg": 701.2388130000015,
+      "p50": 502.09560000000056,
+      "p95": 1703.8914000000077
+    },
+    {
+      "name": "pagination_10",
+      "description": "findQuestions(1, \"test\", 1, 10) - 10개",
+      "iterations": 100,
+      "questionCount": 10,
+      "avg": 500.8245550000001,
+      "p50": 470.4076999999961,
+      "p95": 792.5278999999864
+    },
+    {
+      "name": "full_load",
+      "description": "findQuestions(1, \"test\") - 전체 35개",
+      "iterations": 100,
+      "questionCount": 35,
+      "avg": 1010.8953669999973,
+      "p50": 799.6785000000091,
+      "p95": 2087.5585000000137
+    }
+  ]
+}
