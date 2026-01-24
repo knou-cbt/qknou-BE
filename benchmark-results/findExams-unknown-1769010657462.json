@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-01-21T15:49:45.829Z",
+  "optimizationStep": "unknown",
+  "tests": [
+    {
+      "name": "findExamsBySubject",
+      "description": "SubjectsService.findExamsBySubject(1)",
+      "iterations": 100,
+      "avg": 653.1087779999989,
+      "p50": 591.2534999999916,
+      "p95": 1260.1143999999986
+    }
+  ]
+}

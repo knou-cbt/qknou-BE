@@ -54,14 +54,3 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
-
-# Benchmark results
-benchmark-results/
-*.benchmark.json
-
-# Performance monitoring docs (로컬용, 배포 시 제외)
-PERFORMANCE_MONITORING.md
-NEW_RELIC_SETUP.md
-
-# New Relic logs
-newrelic_agent.log
