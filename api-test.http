@@ -159,3 +159,42 @@ GET {{baseUrl}}/api/departments/2/subjects
 
 ### 29. 존재하지 않는 학과의 과목 목록 조회 (404 테스트)
 GET {{baseUrl}}/api/departments/99999/subjects
+
+### ============================================
+### Auth API (OAuth & JWT)
+### ============================================
+
+### 30. 구글 로그인 (브라우저에서만 가능)
+# 브라우저에서 아래 URL 접속:
+# http://localhost:3000/auth/google
+# 로그인 후 URL에서 token 파라미터 복사하여 아래 @token 변수에 붙여넣기
+
+### 31. 카카오 로그인 (브라우저에서만 가능)
+# 브라우저에서 아래 URL 접속:
+# http://localhost:3000/auth/kakao
+# 로그인 후 URL에서 token 파라미터 복사하여 아래 @token 변수에 붙여넣기
+
+### JWT 토큰 설정 (로그인 후 받은 토큰을 여기에 붙여넣기)
+@token = your-jwt-token-here
+
+### 32. JWT 인증 테스트 - 현재 사용자 정보 조회 (인증 필요)
+GET {{baseUrl}}/auth/me
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5MmMyZmQxOC0yOTczLTQzZDUtYWYyNy1lOGE3MTU2OTM0MTciLCJlbWFpbCI6ImpzNzEyMjQyMEBnbWFpbC5jb20iLCJpYXQiOjE3Njk0MTE3NDMsImV4cCI6MTc3MDAxNjU0M30.iCpaoIBM0pdXP6W24zu7qqYGCqeGWs4BV9VciuYjilM
+
+### 33. JWT 인증 실패 테스트 - 토큰 없이 요청
+GET {{baseUrl}}/auth/me
+
+### 34. JWT 인증 실패 테스트 - 잘못된 토큰
+GET {{baseUrl}}/auth/me
+Authorization: Bearer invalid-token-here
+
+### ============================================
+### 테스트 순서 가이드
+### ============================================
+# 1. 브라우저에서 http://localhost:3000/auth/google 접속
+# 2. 구글 로그인 완료
+# 3. 리다이렉트된 URL에서 token 파라미터 복사
+#    예: http://localhost:3001/auth/success?token=eyJhbG...
+# 4. 위의 @token 변수에 붙여넣기
+# 5. 테스트 32번 실행 → 성공하면 사용자 정보 반환
+# 6. 테스트 33, 34번 실행 → 401 Unauthorized 에러 확인
