@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-01-21T10:48:54.006Z",
+  "optimizationStep": "baseline",
+  "tests": [
+    {
+      "name": "findQuestions_test_mode",
+      "description": "ExamsService.findQuestions(1, \"test\")",
+      "iterations": 100,
+      "avg": 533.3030689999999,
+      "p50": 309.5652999999875,
+      "p95": 1580.9238000000041,
+      "min": 268.2011000000057,
+      "max": 2788.802199999991
+    },
+    {
+      "name": "findQuestions_study_mode",
+      "description": "ExamsService.findQuestions(1, \"study\")",
+      "iterations": 100,
+      "avg": 791.3368210000009,
+      "p50": 586.085699999996,
+      "p95": 1970.467399999994,
+      "min": 269.2045999999973,
+      "max": 3135.9212000000116
+    }
+  ]
+}

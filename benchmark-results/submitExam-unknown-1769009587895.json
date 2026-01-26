@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-01-21T15:32:02.600Z",
+  "optimizationStep": "unknown",
+  "test": "submitExam_only",
+  "tests": [
+    {
+      "name": "submitExam",
+      "description": "ExamsService.submitExam(1, answers)",
+      "iterations": 100,
+      "avg": 618.9456700000001,
+      "p50": 468.1386999999959,
+      "p95": 1593.7354999999952,
+      "min": 272.76020000000426,
+      "max": 2644.1099999999933
+    }
+  ]
+}
