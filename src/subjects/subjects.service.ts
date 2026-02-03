@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Subject } from './entities/subject.entity';
 import { Exam } from 'src/exams/entities/exam.entity';
 
@@ -82,9 +82,6 @@ export class SubjectsService implements OnModuleInit {
     //1. skip 계산(건너뛸 항목 수)
     const skip = (page - 1) * limit;
 
-    //2. WHERE 조건(검색어가 있으면 LIKE 검색)
-    const where = search ? { name: Like(`%${search}%`) } : {};
-
     //3. 전체 과목 수 캐싱 (검색어가 없을 때만)
     if (!search && !this.totalSubjectsCache) {
       this.totalSubjectsCache = await this.subjectRepository.count();
@@ -95,13 +92,16 @@ export class SubjectsService implements OnModuleInit {
     let total: number;
 
     if (search) {
-      // 검색어가 있으면 COUNT도 필요 (검색 결과 개수가 달라지므로)
-      [subjects, total] = await this.subjectRepository.findAndCount({
-        where,
-        skip,
-        take: limit,
-        order: { name: 'ASC'}
-      });
+      // 검색어가 있으면 LOWER로 대소문자 구분 없이 LIKE 검색
+      const qb = this.subjectRepository
+        .createQueryBuilder('subject')
+        .select(['subject.id', 'subject.name'])
+        .where('LOWER(subject.name) LIKE LOWER(:search)', { search: `%${search}%` })
+        .orderBy('subject.name', 'ASC')
+        .skip(skip)
+        .take(limit);
+      subjects = await qb.getMany();
+      total = await qb.getCount();
     } else {
       // 검색어가 없으면 캐시된 total 사용
       subjects = await this.subjectRepository
