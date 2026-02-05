@@ -50,7 +50,11 @@ export class AuthController {
     const { access_token, user } = await this.authService.login(req.user);
     
     // 프론트엔드로 리다이렉트하면서 토큰을 쿼리 파라미터로 전달
-    res.redirect(`${getFrontendUrl()}/auth/success?token=${access_token}`);
+    const frontendUrl = getFrontendUrl();
+    console.log('[OAuth Redirect] FRONTEND_URL:', process.env.FRONTEND_URL);
+    console.log('[OAuth Redirect] NODE_ENV:', process.env.NODE_ENV);
+    console.log('[OAuth Redirect] Final URL:', frontendUrl);
+    res.redirect(`${frontendUrl}/auth/success?token=${access_token}`);
   }
 
   // ========== 카카오 로그인 ==========
@@ -73,7 +77,11 @@ export class AuthController {
   @UseGuards(AuthGuard('kakao'))
   async kakaoAuthCallback(@Req() req, @Res() res: Response) {
     const { access_token, user } = await this.authService.login(req.user);
-    res.redirect(`${getFrontendUrl()}/auth/success?token=${access_token}`);
+    const frontendUrl = getFrontendUrl();
+    console.log('[OAuth Redirect] FRONTEND_URL:', process.env.FRONTEND_URL);
+    console.log('[OAuth Redirect] NODE_ENV:', process.env.NODE_ENV);
+    console.log('[OAuth Redirect] Final URL:', frontendUrl);
+    res.redirect(`${frontendUrl}/auth/success?token=${access_token}`);
   }
 
   // ========== 테스트용 엔드포인트 ==========
