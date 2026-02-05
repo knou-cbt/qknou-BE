@@ -50,15 +50,7 @@ export class AuthController {
     const { access_token, user } = await this.authService.login(req.user);
     
     // 프론트엔드로 리다이렉트하면서 토큰을 쿼리 파라미터로 전달
-    const frontendUrl = getFrontendUrl();
-    const redirectUrl = `${frontendUrl}/auth/success?token=${access_token}`;
-    console.log('[OAuth Redirect] FRONTEND_URL:', process.env.FRONTEND_URL);
-    console.log('[OAuth Redirect] NODE_ENV:', process.env.NODE_ENV);
-    console.log('[OAuth Redirect] Final URL:', frontendUrl);
-    console.log('[OAuth Redirect] Full Redirect URL:', redirectUrl);
-    console.log('[OAuth Redirect] About to call res.redirect()...');
-    res.redirect(redirectUrl);
-    console.log('[OAuth Redirect] res.redirect() called. Headers:', res.getHeaders());
+    res.redirect(`${getFrontendUrl()}/auth/success?token=${access_token}`);
   }
 
   // ========== 카카오 로그인 ==========
@@ -81,15 +73,7 @@ export class AuthController {
   @UseGuards(AuthGuard('kakao'))
   async kakaoAuthCallback(@Req() req, @Res() res: Response) {
     const { access_token, user } = await this.authService.login(req.user);
-    const frontendUrl = getFrontendUrl();
-    const redirectUrl = `${frontendUrl}/auth/success?token=${access_token}`;
-    console.log('[OAuth Redirect] FRONTEND_URL:', process.env.FRONTEND_URL);
-    console.log('[OAuth Redirect] NODE_ENV:', process.env.NODE_ENV);
-    console.log('[OAuth Redirect] Final URL:', frontendUrl);
-    console.log('[OAuth Redirect] Full Redirect URL:', redirectUrl);
-    console.log('[OAuth Redirect] About to call res.redirect()...');
-    res.redirect(redirectUrl);
-    console.log('[OAuth Redirect] res.redirect() called. Headers:', res.getHeaders());
+    res.redirect(`${getFrontendUrl()}/auth/success?token=${access_token}`);
   }
 
   // ========== 테스트용 엔드포인트 ==========

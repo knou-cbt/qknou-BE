@@ -15,6 +15,7 @@ export class KakaoStrategy extends PassportStrategy(Strategy, 'kakao') {
       clientID: configService.get('KAKAO_CLIENT_ID'), //REST API Key
       clientSecret: configService.get('KAKAO_CLIENT_SECRET'), //Client Secret
       callbackURL: configService.get('KAKAO_CALLBACK_URL'), //Redirect URI
+      scope: ['profile_nickname'], // 닉네임 권한 요청
     });
   }
 
@@ -25,29 +26,24 @@ export class KakaoStrategy extends PassportStrategy(Strategy, 'kakao') {
     profile: any,
     done: any
   ): Promise<any> { 
-    // 카카오 profile 구조:
-    // {
-    //   id: "1234567890",
-    //   username: "홍길동",
-    //   _json: {
-    //     kakao_account: {
-    //       email: "hong@kakao.com",
-    //       profile: {
-    //         nickname: "홍길동",
-    //         profile_image_url: "https://...profile.jpg"
-    //       }
-    //     }
-    //   }
-    // }
     const { id, username, _json } = profile;
-    //카카오는 이메일을 제공하지 않을 수도 있음(사용자가 거부 가능)
+    
+    // 닉네임 추출 (여러 경로 시도)
+    const nickname = _json?.kakao_account?.profile?.nickname 
+                  || _json?.properties?.nickname 
+                  || username 
+                  || '사용자';
+    
     const oauthUser = {
-      provider: 'kakako',
+      provider: 'kakao',
       providerId: id.toString(),
-      email: _json.kakao_account?.email || null,
-      name: _json.kakao_account?.profile.nickname || username,
-      profileImage:null,
+      email: _json?.kakao_account?.email || null,
+      name: nickname,
+      profileImage: _json?.kakao_account?.profile?.profile_image_url 
+                 || _json?.properties?.profile_image 
+                 || null,
     }
+    
     const user = await this.authService.validateOAuthUser(oauthUser);
     done(null, user);
     }
