@@ -53,10 +53,12 @@ export class AuthService {
     //JWT의 payload (토큰 안에 들어갈 데이터)
     const payload = {
       sub: user.id, //sub는 JWT표준 필드(subject = 사용자 id)
-      email: user.email
+      email: user.email,
+      name: user.name, // 사용자 이름(닉네임)
     };
     //JWT 토큰 생성(환경변수의 JWT_SECRET으로 서명됨)
     const accessToken = this.jwtService.sign(payload);
+    
     return {
       access_token: accessToken,
       //프론트엔드에서 바로 사용할 수 있는 사용자 정보도 함께 반환
@@ -64,9 +66,9 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
-        profileImage:user.profileImage
+        profileImage: user.profileImage
       }
-    }
+    };
   }
 
   /**
