@@ -23,10 +23,35 @@ async function bootstrap() {
     }),
   );
   
-  // CORS 설정
+  // CORS 허용 origin (로컬 개발 포트 제한 없음)
+  const allowedOrigins: (string | RegExp)[] = [
+    'https://www.qknou.kr',
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/, // 로컬: localhost/127.0.0.1 모든 포트
+  ];
+  const isOriginAllowed = (origin: string) =>
+    allowedOrigins.some((o) =>
+      typeof o === 'string' ? o === origin : (o as RegExp).test(origin),
+    );
+
+  // 304 응답에도 CORS 헤더가 붙도록 가장 먼저 실행 (304 시 CORS 누락 방지)
+  app.use((req, res, next) => {
+    const origin = req.headers.origin as string | undefined;
+    if (origin && isOriginAllowed(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    next();
+  });
+
   app.enableCors({
-    origin: ['http://localhost:3000', 'https://localhost:3000', 'http://localhost:3001', 'https://www.qknou.kr'], // localhost (http/https) + 운영 도메인 허용
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      callback(isOriginAllowed(origin) ? null : new Error('Not allowed by CORS'), isOriginAllowed(origin) ? origin : false);
+    },
     credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    exposedHeaders: ['Content-Length', 'Content-Type'],
   });
 
   // Swagger 설정
