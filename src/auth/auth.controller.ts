@@ -3,6 +3,14 @@ import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { Response } from 'express';
 
+/** OAuth 로그인 성공 후 리다이렉트할 프론트엔드 URL (환경 변수 또는 NODE_ENV 기반) */
+function getFrontendUrl(): string {
+  if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL;
+  return process.env.NODE_ENV === 'production'
+    ? 'https://www.qknou.kr'
+    : 'http://localhost:3001';
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -42,8 +50,7 @@ export class AuthController {
     const { access_token, user } = await this.authService.login(req.user);
     
     // 프론트엔드로 리다이렉트하면서 토큰을 쿼리 파라미터로 전달
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
-    res.redirect(`${frontendUrl}/auth/success?token=${access_token}`);
+    res.redirect(`${getFrontendUrl()}/auth/success?token=${access_token}`);
   }
 
   // ========== 카카오 로그인 ==========
@@ -66,9 +73,7 @@ export class AuthController {
   @UseGuards(AuthGuard('kakao'))
   async kakaoAuthCallback(@Req() req, @Res() res: Response) {
     const { access_token, user } = await this.authService.login(req.user);
-    
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
-    res.redirect(`${frontendUrl}/auth/success?token=${access_token}`);
+    res.redirect(`${getFrontendUrl()}/auth/success?token=${access_token}`);
   }
 
   // ========== 테스트용 엔드포인트 ==========
