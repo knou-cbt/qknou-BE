@@ -16,7 +16,7 @@ export class KakaoStrategy extends PassportStrategy(Strategy, 'kakao') {
       clientSecret: configService.get('KAKAO_CLIENT_SECRET'), //Client Secret
       callbackURL: configService.get('KAKAO_CALLBACK_URL'), //Redirect URI
       scope: ['profile_nickname'], // 닉네임 권한 요청
-    });
+    } as any);
   }
 
   //카카오 로그인 성공 후 자동으로 호출
