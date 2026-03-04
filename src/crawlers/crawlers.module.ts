@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Exam } from 'src/exams/entities/exam.entity';
 import { Questsion } from 'src/questions/entities/question.entity';
 import { SubjectsModule } from 'src/subjects/subjects.module';
+import { StorageModule } from 'src/storage/storage.module';
 import { CrawlerService } from './crawler.service';
 
 @Module({
@@ -11,6 +12,8 @@ import { CrawlerService } from './crawler.service';
     TypeOrmModule.forFeature([Exam, Questsion]),
     // SubjectsService 사용을 위해 SubjectsModule import
     SubjectsModule,
+    // S3/R2 사용을 위해 StorageModule import
+    StorageModule,
   ],
   providers: [
     //이 모듈에서 제공하는 서비스
@@ -19,4 +22,4 @@ import { CrawlerService } from './crawler.service';
     //다른 모듈에서도 사용할 수 있도록 export 
     CrawlerService]
 })
-export class CrawlersModule {}
+export class CrawlersModule { }
