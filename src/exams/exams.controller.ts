@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiParam, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiParam, ApiOkResponse, ApiResponse } from '@nestjs/swagger';
 import { GetQuestionsQueryDto } from './dto/get-questions-query.dto';
+import { FindQuestionsResponseDto } from './dto/find-questions-response.dto';
 import { ExamsService } from './exams.service';
 import { SubmitExamDto } from './dto/submit-exam.dto';
 
@@ -24,10 +25,10 @@ export class ExamsController {
   @Get(':id/questions')
   @ApiOperation({ 
     summary: '시험 문제 조회', 
-    description: '특정 시험의 문제들을 조회합니다. study 모드에서는 정답이 포함되며, 페이지네이션을 지원합니다.' 
+    description: '특정 시험의 문제들을 조회합니다. study 모드에서는 정답이 포함되며, 페이지네이션을 지원합니다. 문제/선택지 이미지는 imageUrls 배열로 제공됩니다.' 
   })
   @ApiParam({ name: 'id', description: '시험 ID', type: Number })
-  @ApiResponse({ status: 200, description: '문제 조회 성공' })
+  @ApiOkResponse({ description: '문제 조회 성공', type: FindQuestionsResponseDto })
   @ApiResponse({ status: 404, description: '시험을 찾을 수 없습니다' })
   async findQuestions(
     @Param('id', ParseIntPipe) id: number,

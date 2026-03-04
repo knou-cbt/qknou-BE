@@ -69,9 +69,8 @@ export class ExamsService {
     const selectFields: string[] = [
       'question.id',
       'question.question_number',
-      'question.question_text',
       'question.example_text',
-      'question.question_image_url',
+      'question.question_image_urls',
       'question.choices'
     ];
 
@@ -114,7 +113,7 @@ export class ExamsService {
           number: question.question_number,
           text: question.question_text,
           example: question.example_text,
-          imageUrl: question.question_image_url,
+          imageUrls: question.question_image_urls,
           choices: question.choices,
         };
 
@@ -363,11 +362,11 @@ export class ExamsService {
       questionNumber: number;          // 문제 번호
       questionText: string;            // 문제 텍스트
       exampleText: string | null;      // 보기문 (선택사항)
-      questionImageUrl: string | null; // 문제 이미지 URL
+      questionImageUrls: string[] | null; // 문제 이미지 URL 배열
       choices: Array<{                 // 선택지 배열 (JSONB로 저장됨)
         number: number;                // 선택지 번호 (1~4)
         text: string;                  // 선택지 텍스트
-        imageUrl: string | null;       // 선택지 이미지 URL
+        imageUrls: string[] | null;    // 선택지 이미지 URL 배열
       }>;
     }> = [];
 
@@ -410,14 +409,19 @@ export class ExamsService {
       const fullText = questionRow.text().trim();
       const questionText = fullText.replace(questionNoText, '').trim();
 
-      // 문제에 포함된 이미지 URL 추출
-      const questionImageUrl = questionRow.find('img').first().attr('src') || null;
+      // 문제에 포함된 이미지 URL 추출 (다중)
+      const questionImages: string[] = [];
+      questionRow.find('img').each((_, img) => {
+        const src = $(img).attr('src');
+        if (src) questionImages.push(src);
+      });
+      const questionImageUrls = questionImages.length > 0 ? questionImages : null;
 
       // 선택지 배열 초기화
       const choices: Array<{
         number: number;
         text: string;
-        imageUrl: string | null;
+        imageUrls: string[] | null;
       }> = [];
 
       // 각 선택지 행을 순회하며 데이터 추출
@@ -433,13 +437,18 @@ export class ExamsService {
         const label = choiceRow.find('label');
         const choiceText = label.text().trim();
 
-        // 선택지에 포함된 이미지 URL 추출
-        const choiceImageUrl = label.find('img').first().attr('src') || null;
+        // 선택지에 포함된 이미지 URL 추출 (다중)
+        const choiceImages: string[] = [];
+        label.find('img').each((_, img) => {
+          const src = $(img).attr('src');
+          if (src) choiceImages.push(src);
+        });
+        const choiceImageUrls = choiceImages.length > 0 ? choiceImages : null;
 
         choices.push({
           number: choiceNumber,
           text: choiceText,
-          imageUrl: choiceImageUrl
+          imageUrls: choiceImageUrls
         });
       });
 
@@ -448,7 +457,7 @@ export class ExamsService {
         questionNumber,
         questionText,
         exampleText,
-        questionImageUrl,
+        questionImageUrls,
         choices
       });
     });
@@ -599,7 +608,7 @@ export class ExamsService {
           question_number: questionData.questionNumber,
           question_text: questionData.questionText,
           example_text: questionData.exampleText,
-          question_image_url: questionData.questionImageUrl,
+          question_image_urls: questionData.questionImageUrls,
           correct_answers: correctAnswers,
           choices: questionData.choices  // JSONB 컬럼에 배열 그대로 저장
         });
