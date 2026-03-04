@@ -69,6 +69,7 @@ export class ExamsService {
     const selectFields: string[] = [
       'question.id',
       'question.question_number',
+      'question.question_text',
       'question.example_text',
       'question.question_image_urls',
       'question.choices'
