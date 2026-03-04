@@ -607,6 +607,15 @@
 | history[].role | 메시지 역할 | string ("user" \| "assistant") | - | N | "user" |
 | history[].content | 메시지 내용 | string | - | N | "DI가 뭐야?" |
 
+**history[].role 설명**
+
+| role | 의미 |
+| --- | --- |
+| user | 사용자(학생)가 보낸 메시지 |
+| assistant | AI 튜터가 보낸 응답 |
+
+대화를 이어갈 때, 이전에 주고받은 메시지를 위 순서대로 history에 넣어 보내면 됩니다. 첫 질문 시에는 history를 생략해도 됩니다.
+
 **Response**
 
 | key | 설명 | value 타입 | 옵션 | Nullable |
