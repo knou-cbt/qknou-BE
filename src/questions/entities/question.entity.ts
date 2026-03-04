@@ -35,6 +35,9 @@ export class Questsion {
   @Column({ type: 'text', nullable: true })
   explanation: string;
 
+  @Column({ type: 'jsonb', nullable: true })
+  concept_tags: string[];
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 

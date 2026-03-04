@@ -10,7 +10,8 @@
 | 10~11 | 시험 | 문제 조회, 제출(채점) |
 | 12~13 | 학과 | 목록 조회, 학과별 과목 목록 |
 | 14~15 | Tutor | 문제 해설 조회/생성, 해설 재생성 |
-| 16~18 | Health | 서버 상태, 성능 측정, DB 연결 |
+| 16 | Tutor | AI 튜터 챗봇 |
+| 17~19 | Health | 서버 상태, 성능 측정, DB 연결 |
 
 ---
 
@@ -515,7 +516,7 @@
 | --- | --- |
 | **Method** | GET |
 | **URL** | /api/tutor/questions/:id/explanation |
-| **설명** | 특정 문제의 해설 조회. DB에 해설이 없으면 AI로 실시간 생성 후 반환합니다. |
+| **설명** | 특정 문제의 해설 조회. DB에 해설이 없으면 AI로 실시간 생성 후 반환합니다. 생성 시 concept_tags도 함께 추출됩니다. |
 
 **Request - Path parameter**
 
@@ -529,6 +530,7 @@
 | --- | --- | --- | --- | --- |
 | success | 성공 여부 | boolean | - | N |
 | explanation | 해설 텍스트 | string | - | N |
+| conceptTags | 핵심 개념 태그 배열 | array of string | - | Y |
 | generated | 이번 요청에서 새로 생성된 해설인지 여부 | boolean | - | N |
 
 **Example**
@@ -536,8 +538,9 @@
 ```json
 {
   "success": true,
-  "explanation": "정답은 3번입니다. 불포화대에서는...",
-  "generated": false
+  "explanation": "가계의 개념은 경제학에서 중요한 요소입니다...",
+  "conceptTags": ["가계", "경제주체", "경제활동", "소비"],
+  "generated": true
 }
 ```
 
@@ -558,7 +561,7 @@
 | --- | --- |
 | **Method** | POST |
 | **URL** | /api/tutor/questions/:id/explanation/regenerate |
-| **설명** | 특정 문제의 해설을 AI로 강제 재생성하여 DB에 덮어씁니다. |
+| **설명** | 특정 문제의 해설을 AI로 강제 재생성하여 DB에 덮어씁니다. concept_tags도 함께 재생성됩니다. |
 
 **Request - Path parameter**
 
@@ -572,6 +575,7 @@
 | --- | --- | --- | --- | --- |
 | success | 성공 여부 | boolean | - | N |
 | explanation | 새로 생성된 해설 텍스트 | string | - | N |
+| conceptTags | 핵심 개념 태그 배열 | array of string | - | N |
 | generated | 재생성 여부 (항상 true) | boolean | - | N |
 
 **Status**
@@ -583,7 +587,134 @@
 
 ---
 
-## 16. Health - 서버 상태 확인
+## 16. Tutor - AI 튜터 챗봇
+
+### **기본 정보**
+
+| 항목 | 내용 |
+| --- | --- |
+| **Method** | POST |
+| **URL** | /api/tutor/chat |
+| **설명** | 현재 문제 기반으로 개념 질문, 개념 비교, 관련 문제 추천 등을 처리하는 AI 튜터 챗봇입니다. |
+
+**Request - Body (JSON)**
+
+| key | 설명 | value 타입 | 옵션 | Nullable | 예시 |
+| --- | --- | --- | --- | --- | --- |
+| questionId | 현재 문제 ID | number | - | N | 101 |
+| message | 사용자 질문 | string | - | N | "DI가 뭐야?" |
+| history | 최근 대화 내역 | array | optional | Y | - |
+| history[].role | 메시지 역할 | string ("user" \| "assistant") | - | N | "user" |
+| history[].content | 메시지 내용 | string | - | N | "DI가 뭐야?" |
+
+**history[].role 설명**
+
+| role | 의미 |
+| --- | --- |
+| user | 사용자(학생)가 보낸 메시지 |
+| assistant | AI 튜터가 보낸 응답 |
+
+대화를 이어갈 때, 이전에 주고받은 메시지를 위 순서대로 history에 넣어 보내면 됩니다. 첫 질문 시에는 history를 생략해도 됩니다.
+
+**Response**
+
+| key | 설명 | value 타입 | 옵션 | Nullable |
+| --- | --- | --- | --- | --- |
+| success | 성공 여부 | boolean | - | N |
+| data.answer | AI 튜터 응답 텍스트 | string | - | N |
+| data.intent | 분류된 질문 의도 | string ("define" \| "compare" \| "recommend" \| "general") | - | N |
+| data.recommendations | 추천 문제 목록 (intent=recommend일 때만) | array | optional | Y |
+| data.recommendations[].id | 문제 ID | number | - | N |
+| data.recommendations[].questionNumber | 문제 번호 | number | - | N |
+| data.recommendations[].text | 문제 텍스트 (80자 요약) | string | - | N |
+| data.recommendations[].examTitle | 시험 제목 | string | - | N |
+| data.recommendations[].year | 시험 연도 | number | - | N |
+
+**Example - 개념 질문 (define)**
+
+```json
+// Request
+{
+  "questionId": 1,
+  "message": "가계가 뭐야?"
+}
+
+// Response
+{
+  "success": true,
+  "data": {
+    "answer": "가계는 개인이나 가구가 소비와 저축을 통해 경제활동을 하는 단위입니다...",
+    "intent": "define"
+  }
+}
+```
+
+**Example - 개념 비교 (compare)**
+
+```json
+// Request
+{
+  "questionId": 1,
+  "message": "가계랑 기업의 차이가 뭐야?"
+}
+
+// Response
+{
+  "success": true,
+  "data": {
+    "answer": "가계와 기업은 경제에서 중요한 두 가지 주체로...",
+    "intent": "compare"
+  }
+}
+```
+
+**Example - 관련 문제 추천 (recommend)**
+
+```json
+// Request
+{
+  "questionId": 1,
+  "message": "비슷한 문제 더 줘"
+}
+
+// Response
+{
+  "success": true,
+  "data": {
+    "answer": "\"가계\" 관련 문제 3개를 찾았습니다.",
+    "intent": "recommend",
+    "recommendations": [
+      {
+        "id": 15,
+        "questionNumber": 40,
+        "text": "가계의 경제적 기능에 대한 설명으로 옳지 않은 것은?...",
+        "examTitle": "가계재무관리",
+        "year": 2020
+      }
+    ]
+  }
+}
+```
+
+**Intent 분류 기준**
+
+| intent | 동작 | 예시 질문 |
+| --- | --- | --- |
+| define | 개념 설명 (terms 캐시 활용) | "CPU가 뭐야?", "DI 설명해줘" |
+| compare | 두 개 이상 개념 비교 | "DI랑 IoC 차이가 뭐야?" |
+| recommend | concept_tags 기반 관련 문제 추천 | "비슷한 문제 더 줘" |
+| general | 일반 학습 질문 | "이 과목 시험 잘 보려면?" |
+
+**Status**
+
+| status | response content |
+| --- | --- |
+| 200 | 챗봇 응답 성공 |
+| 404 | 문제를 찾을 수 없습니다 |
+
+---
+
+## 17. Health - 서버 상태 확인
 
 ### **기본 정보**
 
@@ -609,7 +740,7 @@
 
 ---
 
-## 17. Health - 성능 측정
+## 18. Health - 성능 측정
 
 ### **기본 정보**
 
@@ -638,7 +769,7 @@
 
 ---
 
-## 18. Health - DB 연결 상태
+## 19. Health - DB 연결 상태
 
 ### **기본 정보**
 
