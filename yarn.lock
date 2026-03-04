@@ -1402,7 +1402,7 @@
   resolved "https://registry.yarnpkg.com/@types/json-schema/-/json-schema-7.0.15.tgz#596a1747233694d50f6ad8a7869fcb6f56cf5841"
   integrity sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==
 
-"@types/jsonwebtoken@9.0.10":
+"@types/jsonwebtoken@*", "@types/jsonwebtoken@9.0.10":
   version "9.0.10"
   resolved "https://registry.yarnpkg.com/@types/jsonwebtoken/-/jsonwebtoken-9.0.10.tgz#a7932a47177dcd4283b6146f3bd5c26d82647f09"
   integrity sha512-asx5hIG9Qmf/1oStypjanR7iKTv0gXQ1Ov/jfrX6kS/EO0OFni8orbmGCn0672NHR3kXHwpAwR+B368ZGN/2rA==
@@ -1455,6 +1455,22 @@
     "@types/passport" "*"
     "@types/passport-oauth2" "*"
 
+"@types/passport-jwt@^4.0.1":
+  version "4.0.1"
+  resolved "https://registry.yarnpkg.com/@types/passport-jwt/-/passport-jwt-4.0.1.tgz#080fbe934fb9f6954fb88ec4cdf4bb2cc7c4d435"
+  integrity sha512-Y0Ykz6nWP4jpxgEUYq8NoVZeCQPo1ZndJLfapI249g1jHChvRfZRO/LS3tqu26YgAS/laI1qx98sYGz0IalRXQ==
+  dependencies:
+    "@types/jsonwebtoken" "*"
+    "@types/passport-strategy" "*"
+
+"@types/passport-kakao@^1.0.3":
+  version "1.0.3"
+  resolved "https://registry.yarnpkg.com/@types/passport-kakao/-/passport-kakao-1.0.3.tgz#b42e02e5649b5574d6bab35a74bad7a8d05f334f"
+  integrity sha512-McK5kpeiOptvjIPkiA/QS3k82//z5JM7Y3yBLMDvEA0QMMhFMcWUHhyebL1Qy+0i0n8jS+Oe4U6xAvkU22SXXA==
+  dependencies:
+    "@types/express" "*"
+    "@types/passport" "*"
+
 "@types/passport-oauth2@*":
   version "1.8.0"
   resolved "https://registry.yarnpkg.com/@types/passport-oauth2/-/passport-oauth2-1.8.0.tgz#68830666b9dad0fbf68c704721f56346d2c72ba0"
@@ -1462,6 +1478,14 @@
   dependencies:
     "@types/express" "*"
     "@types/oauth" "*"
+    "@types/passport" "*"
+
+"@types/passport-strategy@*":
+  version "0.2.38"
+  resolved "https://registry.yarnpkg.com/@types/passport-strategy/-/passport-strategy-0.2.38.tgz#482abba0b165cd4553ec8b748f30b022bd6c04d3"
+  integrity sha512-GC6eMqqojOooq993Tmnmp7AUTbbQSgilyvpCYQjT+H6JfG/g6RGc7nXEniZlp0zyKJ0WUdOiZWLBZft9Yug1uA==
+  dependencies:
+    "@types/express" "*"
     "@types/passport" "*"
 
 "@types/passport@*":
@@ -4885,6 +4909,11 @@ onetime@^5.1.0, onetime@^5.1.2:
   integrity sha512-kbpaSSGJTWdAY5KPVeMOKXSrPtr8C8C7wodJbcsd51jRnmD+GZu8Y0VoU6Dm5Z4vWr0Ig/1NKuWRKf7j5aaYSg==
   dependencies:
     mimic-fn "^2.1.0"
+
+openai@^6.25.0:
+  version "6.25.0"
+  resolved "https://registry.yarnpkg.com/openai/-/openai-6.25.0.tgz#a874e43c0f514464ea83d62c7b746ff4d39a031a"
+  integrity sha512-mEh6VZ2ds2AGGokWARo18aPISI1OhlgdEIC1ewhkZr8pSIT31dec0ecr9Nhxx0JlybyOgoAT1sWeKtwPZzJyww==
 
 optionator@^0.9.3:
   version "0.9.4"

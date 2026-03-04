@@ -11,19 +11,20 @@ import { CrawlersModule } from './crawlers/crawlers.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { TutorModule } from './tutor/tutor.module';
 
 // DATABASE_URL의 비밀번호 부분을 URL 인코딩하는 함수
 function encodePasswordInUrl(url: string): string {
   try {
     // postgresql://username:password@host:port/database 형식 파싱
     const match = url.match(/^(postgresql:\/\/[^:]+:)([^@]+)(@.+)$/);
-    
+
     if (match) {
       const [, prefix, password, suffix] = match;
       const encodedPassword = encodeURIComponent(password);
       return `${prefix}${encodedPassword}${suffix}`;
     }
-    
+
     return url;
   } catch (error) {
     console.error('URL 인코딩 실패:', error);
@@ -38,7 +39,7 @@ function encodePasswordInUrl(url: string): string {
       envFilePath: [
         `.env.${process.env.NODE_ENV || 'development'}`,
         '.env'
-  ],
+      ],
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -46,7 +47,7 @@ function encodePasswordInUrl(url: string): string {
         const databaseUrl = configService.get('DATABASE_URL');
         const nodeEnv = configService.get('NODE_ENV');
         const synchronize = nodeEnv !== 'production';
-        
+
         // 디버깅 로그
         console.log('=== TypeORM 설정 확인 ===');
         console.log('NODE_ENV:', nodeEnv);
@@ -55,7 +56,7 @@ function encodePasswordInUrl(url: string): string {
 
         // URL의 비밀번호 부분을 인코딩
         const encodedUrl = databaseUrl ? encodePasswordInUrl(databaseUrl) : '';
-        
+
         return {
           type: 'postgres',
           url: encodedUrl,
@@ -86,8 +87,9 @@ function encodePasswordInUrl(url: string): string {
     HealthModule,
     AuthModule,
     UsersModule,
+    TutorModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }

@@ -7,6 +7,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { Subject } from 'rxjs';
 import { InjectRepository } from '@nestjs/typeorm';
+import { TutorService } from 'src/tutor/tutor.service';
 
 /**
  * 복수 정답 매핑 테이블
@@ -26,14 +27,14 @@ const MULTIPLE_ANSWER_MAP: Record<string, number[]> = {
 @Injectable()
 export class ExamsService {
   constructor(
-   
+
     @InjectRepository(Exam)
     private examRepository: Repository<Exam>,
     @InjectRepository(Questsion)
     private questionRepository: Repository<Questsion>,
     private subjectsService: SubjectsService,  // 과목 관리 서비스
-    private dataSource: DataSource              // TypeORM DataSource (트랜잭션 처리용)
-
+    private dataSource: DataSource,              // TypeORM DataSource (트랜잭션 처리용)
+    private tutorService: TutorService
   ) { }
 
   /**
@@ -44,7 +45,7 @@ export class ExamsService {
    * @param limit - 페이지당 문제 수 (선택사항)
    */
   async findQuestions(
-    examId: number, 
+    examId: number,
     mode: 'study' | 'test' = 'test',
     page?: number,
     limit?: number
@@ -57,14 +58,14 @@ export class ExamsService {
       .leftJoin('exam.subject', 'subject')
       .where('exam.id = :examId', { examId })
       .getOne();
-    
+
     if (!exam) {
       throw new NotFoundException(`시험 id ${examId}를 찾을 수 없습니다.`)
     }
 
     //2. 문제 조회 (mode에 따라 필요한 필드만 선택)
     const isStudyMode = mode === 'study';
-    
+
     const selectFields: string[] = [
       'question.id',
       'question.question_number',
@@ -73,27 +74,27 @@ export class ExamsService {
       'question.question_image_url',
       'question.choices'
     ];
-    
+
     // study 모드일 때만 정답/해설 필드 추가
     if (isStudyMode) {
       selectFields.push('question.correct_answers', 'question.explanation');
     }
-    
+
     // QueryBuilder 생성
     let queryBuilder = this.questionRepository
       .createQueryBuilder('question')
       .select(selectFields)
       .where('question.exam_id = :examId', { examId })
       .orderBy('question.question_number', 'ASC');
-    
+
     // 페이지네이션 적용 (page와 limit이 모두 제공된 경우에만)
     if (page && limit) {
       const skip = (page - 1) * limit;
       queryBuilder = queryBuilder.skip(skip).take(limit);
     }
-    
+
     const questions = await queryBuilder.getMany();
-    
+
     if (questions.length === 0) {
       throw new NotFoundException(`시험 id ${examId}에 문제가 없습니다.`)
     }
@@ -116,13 +117,13 @@ export class ExamsService {
           imageUrl: question.question_image_url,
           choices: question.choices,
         };
-        
+
         //study 모드일때만 정답 및 해설 포함 
         if (isStudyMode) {
           questionData.correctAnswers = question.correct_answers;
           questionData.explanation = question.explanation;
         }
-        
+
         return questionData;
       })
     };
@@ -141,17 +142,17 @@ export class ExamsService {
 
     return response;
   }
-   
+
   /**
    * 답안 제출 및 채점
    */
   async submitExam(
     examId: number,
-    answers: {questionId: number, selectedAnswer: number | null}[]
+    answers: { questionId: number, selectedAnswer: number | null }[]
   ) {
     //1. 시험 정보 조회 (필요한 필드만)
     const exam = await this.examRepository.findOne({
-      where: {id: examId},
+      where: { id: examId },
       select: ['id', 'total_questions']
     })
     if (!exam) {
@@ -176,7 +177,7 @@ export class ExamsService {
       //사용자 답안 가져오기
       const userAnswer = answerMap.get(question.id) || null
       // console.log("userAnswer(문제에 대한 답) >> ", userAnswer);
-      
+
       //복수 정답 처리: 사용자 답안이 정답 배열에 포함되어 있으면 정답
       const isCorrect = userAnswer !== null &&
         question.correct_answers.includes(userAnswer)
@@ -195,7 +196,7 @@ export class ExamsService {
     })
 
     //5. 점수 계산
-    const score =Math.round((correctCount / questions.length)*100)
+    const score = Math.round((correctCount / questions.length) * 100)
     return {
       examId,
       totalQuestions: questions.length,
@@ -213,12 +214,12 @@ export class ExamsService {
    */
   private parseCorrectAnswers(answerText: string): number[] {
     const trimmed = answerText.trim();
-    
+
     // 복수 정답 체크 (A~K)
     if (MULTIPLE_ANSWER_MAP[trimmed]) {
       return MULTIPLE_ANSWER_MAP[trimmed];
     }
-    
+
     // 단일 정답 (1~4)
     const parsed = parseInt(trimmed);
     if (isNaN(parsed)) {
@@ -239,13 +240,13 @@ export class ExamsService {
       if (examTypeText.includes('동계')) return 4;
       return 3; // 하계/동계 구분 안 됨
     }
-    
+
     // 기말시험 체크 (1학기/2학기 구분)
     if (examTypeText.includes('기말')) {
       if (examTypeText.includes('2학기') || examTypeText.includes('2 학기')) return 2;
       return 1; // 1학기 기말 (기본값)
     }
-    
+
     return 1; // 기본값: 1학기 기말
   }
 
@@ -267,40 +268,40 @@ export class ExamsService {
     // 2단계: 시험 메타 정보 추출
     // ========================================
     console.log('시험 정보 파싱 중...');
-    
+
     let year: number | null = null;  // 시험 연도 (추출 실패 시 null)
     let questionCount: number; // 예상 문제 수
     let subjectName: string;   // 과목명
     let examTypeText: string;  // 시험 종류 (예: '1학기 기말')
     let semester: number | null = null; // 학기 정보 (1학기, 2학기)
-    
+
     // HTML 구조가 다른 두 가지 버전 지원
-    
+
     // 버전 1: alla6TitleTbl 클래스를 사용하는 버전
     const alla6InfoTable = $('table.alla6TitleTbl tbody');
     if (alla6InfoTable.length > 0) {
       console.log('alla6TitleTbl 버전 감지');
       const infoText = alla6InfoTable.text();
-      
+
       // 정규식으로 연도, 학기, 문제 수 추출
       const yearMatch = infoText.match(/(\d{4})\s*학년도/);
       const semesterMatch = infoText.match(/(\d+)\s*학기/);
       const questionCountMatch = infoText.match(/학년\s*(\d+)\s*문항/);
-      
+
       year = yearMatch ? parseInt(yearMatch[1]) : null;
       semester = semesterMatch ? parseInt(semesterMatch[1]) : null;
       questionCount = questionCountMatch ? parseInt(questionCountMatch[1]) : 0;
-      
+
       // 테이블 구조: 1행=연도/학기/학년/문항, 2행=과목명, 3행=시험종류
       subjectName = alla6InfoTable.find('tr').eq(1).find('td').text().trim();
       examTypeText = alla6InfoTable.find('tr').eq(2).find('td').text().replace('시험종류', '').replace(':', '').trim();
     } else {
       // 버전 2: 기본 table tbody 사용 (allaTitleTbl 등)
       console.log('  📌 기본 tbody 버전 감지');
-      
+
       // allaTitleTbl 클래스가 있으면 직접 사용
       let infoTable = $('table.allaTitleTbl tbody');
-      
+
       // 없거나 비어있으면, tr이 있는 tbody 찾기 (비어있지 않은 tbody)
       if (infoTable.length === 0 || infoTable.find('tr').length === 0) {
         $('table tbody').each((_, elem) => {
@@ -311,39 +312,39 @@ export class ExamsService {
           }
         });
       }
-      
+
       // 첫 번째 행의 첫 번째 td에서 정보 추출 (span.ibold 태그 사용)
       const firstRowTd = infoTable.find('tr').first().find('td').first();
       const infoText = firstRowTd.text();
-      console.log("정규식 전 형태  >> ",infoText);
-      
+      console.log("정규식 전 형태  >> ", infoText);
+
       // 정규식으로 연도, 학기, 문제 수 추출
       const yearMatch = infoText.match(/(\d{4})\s*학년도/);
       const semesterMatch = infoText.match(/(\d+)\s*학기/);
       const questionCountMatch = infoText.match(/학년\s*(\d+)\s*문항/);
-      console.log("yearMatch >> ",yearMatch);
-      console.log("semesterMatch >> ",semesterMatch);
-      console.log("questionCountMatch >> ",questionCountMatch);
-      
+      console.log("yearMatch >> ", yearMatch);
+      console.log("semesterMatch >> ", semesterMatch);
+      console.log("questionCountMatch >> ", questionCountMatch);
+
       year = yearMatch ? parseInt(yearMatch[1]) : null;
       semester = semesterMatch ? parseInt(semesterMatch[1]) : null;
       questionCount = questionCountMatch ? parseInt(questionCountMatch[1]) : 0;
-      
+
       // 테이블 구조: 1행=연도/학기/학년/문항, 2행=과목명, 3행=시험종류
       subjectName = infoTable.find('tr').eq(1).find('td').text().trim();
       examTypeText = infoTable.find('tr').eq(2).find('td').text().trim();
     }
-    
+
     // 시험 타입 변환 및 제목 생성
     // examTypeText에 학기 정보가 없고, 추출한 학기 정보가 있으면 추가
     if (semester && !examTypeText.includes('학기')) {
       examTypeText = `${semester}학기 ${examTypeText}`;
     }
-    
+
     const examType = this.parseExamType(examTypeText);
     const yearText = year ? `${year}년도` : '연도 미상';
     const title = subjectName;  // title에는 과목명만 저장 (year, exam_type은 별도 컬럼으로 관리)
-    
+
     console.log(`  - 과목: ${subjectName}`);
     console.log(`  - 시험 종류: ${examTypeText} (타입: ${examType})`);
     console.log(`  - 년도: ${year ?? '미상'}`);
@@ -356,7 +357,7 @@ export class ExamsService {
     // 3단계: 문제 및 선택지 크롤링
     // ========================================
     console.log('❓ 문제 크롤링 중...');
-    
+
     // 크롤링한 문제 데이터를 담을 배열
     const questions: Array<{
       questionNumber: number;          // 문제 번호
@@ -375,7 +376,7 @@ export class ExamsService {
     let questionClass = 'allaQuestionNo';          // 문제 번호 클래스
     let questionRowClass = 'allaQuestionTr';       // 문제 행 클래스
     let answerRowClass = 'allaAnswerTr';           // 선택지 행 클래스
-    
+
     // alla6 버전으로 전환 (allaBasicTbl이 없을 경우)
     if (questionTables.length === 0) {
       console.log('  📌 alla6BasicTbl 사용');
@@ -390,11 +391,11 @@ export class ExamsService {
     // 각 문제 테이블을 순회하며 데이터 추출
     questionTables.each((_, element) => {
       const table = $(element);
-      
+
       // 문제 번호 추출
       const questionNoText = table.find(`span.${questionClass}`).text().trim();
       const questionNumber = parseInt(questionNoText);
-      
+
       if (isNaN(questionNumber)) return;  // 유효하지 않은 문제 번호는 건너뜀
 
       // 보기문 추출 (선택사항 - 없을 수도 있음)
@@ -424,7 +425,7 @@ export class ExamsService {
         const choiceRow = $(choiceElement);
         const input = choiceRow.find('input[type=radio]');
         const choiceNumber = parseInt(input.attr('value') || '0');
-        
+
         // value=5는 "모름", value=0은 잘못된 값 → 제외
         if (choiceNumber === 5 || choiceNumber === 0) return;
 
@@ -458,25 +459,25 @@ export class ExamsService {
     // 4단계: 정답표 크롤링
     // ========================================
     console.log('✔️  정답표 파싱 중...');
-    
+
     // 문제 번호 → 정답 배열 매핑 (예: 1 → [2], 10 → [1, 2])
     const answerMap = new Map<number, number[]>();
-    
+
     // 방법 1: 테이블 형식 정답표 (allaAnswerTableDiv)
     const answerTableDiv = $('.allaAnswerTableDiv table tr');
     if (answerTableDiv.length > 1) {  // 헤더 포함 최소 2행 이상
       console.log('  📌 테이블 형식 정답표');
-      
+
       answerTableDiv.each((index, row) => {
         if (index === 0) return;  // 헤더 행 건너뛰기
-        
+
         const cells = $(row).find('td');
         if (cells.length < 2) return;  // 최소 2개 컬럼 필요
-        
+
         // 1열: 문제 번호, 2열: 정답
         const questionNo = parseInt(cells.eq(0).text().trim());
         const answerText = cells.eq(1).text().trim();
-        
+
         if (!isNaN(questionNo) && answerText) {
           try {
             answerMap.set(questionNo, this.parseCorrectAnswers(answerText));
@@ -488,18 +489,18 @@ export class ExamsService {
     } else {
       // 방법 2: 문자열 형식 정답표 (예: "K2343433211...")
       console.log('  📌 문자열 형식 정답표');
-      
+
       const answerStringRow = $('table tbody tr:contains("문제답안")');
       if (answerStringRow.length > 0) {
         // "문제답안" 행의 다음 행에서 정답 문자열 추출
         const answerString = answerStringRow.next().find('td').text().trim();
         console.log(`  📝 정답 문자열: ${answerString}`);
-        
+
         // 각 문자가 순서대로 문제 1, 2, 3...의 정답
         for (let i = 0; i < answerString.length; i++) {
           const char = answerString[i];
           const questionNo = i + 1;
-          
+
           try {
             const answers = this.parseCorrectAnswers(char);
             answerMap.set(questionNo, answers);
@@ -529,7 +530,7 @@ export class ExamsService {
     // 5단계: 트랜잭션으로 DB 저장
     // ========================================
     console.log('💾 데이터베이스 저장 중...');
-    
+
     return await this.dataSource.transaction(async (manager) => {
       // 5-1. 과목 찾기 또는 생성 (중복 체크를 위해 먼저 실행)
       const subject = await this.subjectsService.findOrCreateByName(subjectName);
@@ -544,21 +545,21 @@ export class ExamsService {
       });
 
       let savedExam: Exam;
-      
+
       if (existingExam) {
         if (forceRetry) {
           // --retry 옵션: 기존 데이터 업데이트
           console.log('  ⚠️  기존 시험 업데이트 중...');
           console.log(`     ID: ${existingExam.id}, 제목: ${existingExam.title}`);
-          
+
           // 기존 questions 삭제 (새로운 문제로 대체)
           await manager.delete(Questsion, { exam_id: existingExam.id });
-          
+
           // exam 정보 업데이트
           existingExam.title = title;
           existingExam.total_questions = questions.length;
           savedExam = await manager.save(existingExam);
-          
+
           console.log('  ✅ 업데이트 완료');
         } else {
           // 일반 모드: 중복 시 에러 발생
@@ -585,7 +586,7 @@ export class ExamsService {
       for (const questionData of questions) {
         // 해당 문제의 정답 가져오기
         const correctAnswers = answerMap.get(questionData.questionNumber);
-        
+
         // 정답이 없는 문제는 건너뛰기
         if (!correctAnswers || correctAnswers.length === 0) {
           console.warn(`  ⚠️  문제 ${questionData.questionNumber} 정답 없음, 건너뜀`);
