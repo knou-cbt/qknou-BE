@@ -33,7 +33,7 @@ export class StorageService {
             const extMatch = contentType.match(/\/(.*?)$/);
             const ext = extMatch ? extMatch[1] : 'jpg';
 
-            const fileName = `crawled-images/${identifier}_${Date.now()}.${ext}`;
+            const fileName = `crawled-images/${identifier}.${ext}`;
 
             await this.s3Client.send(
                 new PutObjectCommand({

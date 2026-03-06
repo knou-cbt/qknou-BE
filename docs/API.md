@@ -337,7 +337,8 @@
 | data.questions[].id | 문제 ID | number | - | N | 101 |
 | data.questions[].number | 문제 번호 | number | - | N | 1 |
 | data.questions[].text | 문제 지문 텍스트 | string | - | N | "다음 중 옳은 것은?" |
-| data.questions[].example | 예시/보기 텍스트 | string | optional | Y | null |
+| data.questions[].example | 예시/보기 텍스트 (코드 블록은 마크다운 형식으로 포함, 아래 참고) | string | optional | Y | null |
+| data.questions[].sharedExample | 공통 보기 텍스트 (여러 문제가 공유하는 보기, 코드 블록 포함 가능) | string | optional | Y | null |
 | data.questions[].imageUrls | 문제에 첨부된 이미지 URL 배열 (문장 중간/보기 그림 등) | array of string | optional | Y | ["https://..."] 또는 null |
 | data.questions[].choices | 선택지 배열 | array | - | N | - |
 | data.questions[].choices[].number | 선택지 번호 (1~4) | number | - | N | 1 |
@@ -372,6 +373,7 @@
         "number": 36,
         "text": "다음은 토양과 지하수와의 관계를 설명한 내용이다. 잘못 설명된 것은?",
         "example": null,
+        "sharedExample": null,
         "imageUrls": null,
         "choices": [
           { "number": 1, "text": "비피압대수층...", "imageUrls": null },
@@ -388,6 +390,55 @@
       "hasPrev": false
     }
   }
+}
+```
+
+**example 필드 코드 블록 처리**
+
+`example` 필드에 코드가 포함된 경우, 마크다운 코드 블록 형식으로 저장됩니다.
+
+예시:
+```
+(3∼4) 다음과 같은 프로그램이 있을 때 물음에 답하시오.
+(여기서 'A'의 ASCII값은 65이다.)
+
+```cpp
+#include <stdio.h>
+void main() {
+  char var='A';
+  printf("var1=%d var2=%c", var, var);
+}
+```　
+```
+
+프론트엔드 렌더링 가이드:
+1. ` ```언어명 ` ~ ` ``` ` 패턴을 정규식으로 파싱
+2. 코드 블록은 `<pre><code>` 태그로 렌더링 (syntax highlighting 권장)
+3. 나머지 텍스트는 `white-space: pre-wrap` 스타일 적용
+
+React 파싱 예시:
+```tsx
+function ExampleText({ text }: { text: string }) {
+  if (!text) return null;
+  
+  const parts = text.split(/(```\w*\n[\s\S]*?\n```)/g);
+  
+  return (
+    <div className="example-text">
+      {parts.map((part, i) => {
+        const codeMatch = part.match(/```(\w*)\n([\s\S]*?)\n```/);
+        if (codeMatch) {
+          const [, lang, code] = codeMatch;
+          return (
+            <pre key={i} className={`code-block language-${lang}`}>
+              <code>{code}</code>
+            </pre>
+          );
+        }
+        return <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>;
+      })}
+    </div>
+  );
 }
 ```
 

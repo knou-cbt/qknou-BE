@@ -71,6 +71,7 @@ export class ExamsService {
       'question.question_number',
       'question.question_text',
       'question.example_text',
+      'question.shared_example',
       'question.question_image_urls',
       'question.choices'
     ];
@@ -114,6 +115,7 @@ export class ExamsService {
           number: question.question_number,
           text: question.question_text,
           example: question.example_text,
+          sharedExample: question.shared_example,
           imageUrls: question.question_image_urls,
           choices: question.choices,
         };
@@ -388,7 +390,71 @@ export class ExamsService {
       console.log('  📌 allaBasicTbl 사용');
     }
 
-    // 각 문제 테이블을 순회하며 데이터 추출
+    // 공통 보기 저장용 Map: 문제 번호 → 공통 보기 텍스트
+    const sharedExampleMap = new Map<number, string>();
+
+    // 디버깅: 모든 문제 번호 span 출력
+    const allQuestionNos: string[] = [];
+    $(`span.alla6QuestionNo, span.allaQuestionNo`).each((_, el) => {
+      allQuestionNos.push($(el).text().trim());
+    });
+    console.log(`  🔢 발견된 문제번호 span들: ${allQuestionNos.slice(0, 10).join(', ')}${allQuestionNos.length > 10 ? '...' : ''}`);
+
+    // 1차: 공통 보기(※) 블록 파싱 - span.alla6QuestionNo 또는 span.allaQuestionNo가 ※인 요소 직접 탐색
+    $(`span.alla6QuestionNo, span.allaQuestionNo`).each((_, element) => {
+      const $span = $(element);
+      const questionNoText = $span.text().trim();
+
+      // ※ 로 시작하는 공통 보기 블록인지 확인
+      if (questionNoText === '※') {
+        // 부모 tbody 또는 table에서 공통 보기 내용 추출
+        const $parentTbody = $span.closest('tbody');
+        const $parentTd = $span.closest('td');
+        const fullText = $parentTd.text().trim();
+
+        console.log(`  🔍 공통 보기 후보 발견: "${fullText.substring(0, 50)}..."`);
+
+        // "(3~4)", "(3∼4)", "(3-4)", "(3～4)" 등의 구간 패턴 추출 (다양한 물결표/대시 지원)
+        const rangeMatch = fullText.match(/\((\d+)\s*[~∼～\-–—]\s*(\d+)\)/);
+        if (rangeMatch) {
+          const startNum = parseInt(rangeMatch[1]);
+          const endNum = parseInt(rangeMatch[2]);
+
+          // 공통 보기 텍스트 (※ 제외)
+          let sharedText = fullText.replace('※', '').trim();
+
+          // 공통 보기의 코드 블록도 추출 (같은 tbody 내에서)
+          const exampleSrcRow = $parentTbody.find('tr.alla6ExampleTr_Src, tr.allaExampleTr_Src');
+          if (exampleSrcRow.length > 0) {
+            const codeText = exampleSrcRow.find('td pre').text().trim();
+            if (codeText) {
+              sharedText = `${sharedText}\n\n${codeText}`;
+            }
+          }
+
+          // 텍스트 보기도 추출 (같은 tbody 내에서)
+          const exampleTxtRow = $parentTbody.find('tr.alla6ExampleTr_Txt .allaExampleList_p, tr.allaExampleTr_Txt .allaExampleList_p');
+          if (exampleTxtRow.length > 0) {
+            const txtContent = exampleTxtRow.text().trim();
+            if (txtContent) {
+              sharedText = `${sharedText}\n\n${txtContent}`;
+            }
+          }
+
+          // 해당 구간의 모든 문제 번호에 공통 보기 매핑
+          for (let i = startNum; i <= endNum; i++) {
+            sharedExampleMap.set(i, sharedText);
+          }
+
+          console.log(`  📌 공통 보기 감지: 문제 ${startNum}~${endNum}`);
+          console.log(`     내용 미리보기: "${sharedText.substring(0, 100)}..."`);
+        } else {
+          console.log(`  ⚠️  공통 보기 구간 패턴 매칭 실패: "${fullText.substring(0, 80)}"`);
+        }
+      }
+    });
+
+    // 2차 순회: 실제 문제 데이터 추출
     questionTables.each((_, element) => {
       const table = $(element);
 
@@ -396,13 +462,29 @@ export class ExamsService {
       const questionNoText = table.find(`span.${questionClass}`).text().trim();
       const questionNumber = parseInt(questionNoText);
 
-      if (isNaN(questionNumber)) return;  // 유효하지 않은 문제 번호는 건너뜀
+      // 유효하지 않은 문제 번호(※ 등)는 건너뜀
+      if (isNaN(questionNumber)) return;
 
-      // 보기문 추출 (선택사항 - 없을 수도 있음)
+      // 보기문 추출 (텍스트 보기 - alla6ExampleTr_Txt / allaExampleTr_Txt)
       let exampleText: string | null = null;
       const exampleRow = table.find('tr.alla6ExampleTr_Txt .allaExampleList_p, tr.allaExampleTr_Txt .allaExampleList_p');
       if (exampleRow.length > 0) {
         exampleText = exampleRow.text().trim();
+      }
+
+      // 보기 코드 추출 (소스 코드 - alla6ExampleTr_Src / allaExampleTr_Src)
+      const exampleSrcRow = table.find('tr.alla6ExampleTr_Src, tr.allaExampleTr_Src');
+      if (exampleSrcRow.length > 0) {
+        const codeText = exampleSrcRow.find('td pre').text().trim();
+        if (codeText) {
+          exampleText = exampleText ? `${exampleText}\n\n${codeText}` : codeText;
+        }
+      }
+
+      // 공통 보기가 있으면 앞에 추가
+      const sharedExample = sharedExampleMap.get(questionNumber);
+      if (sharedExample) {
+        exampleText = exampleText ? `${sharedExample}\n\n${exampleText}` : sharedExample;
       }
 
       // 문제 텍스트 추출 (문제 번호를 제외한 순수 텍스트)

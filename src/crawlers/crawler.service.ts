@@ -286,6 +286,7 @@ export class CrawlerService {
       questionNumber: number;
       questionText: string;
       exampleText: string | null;
+      sharedExample: string | null;
       questionImageUrls: string[] | null;
       choices: Array<{
         number: number;
@@ -309,6 +310,79 @@ export class CrawlerService {
       console.log('  📌 allaBasicTbl 사용');
     }
 
+    // 공통 보기 저장용 Map: 문제 번호 → 공통 보기 텍스트
+    const sharedExampleMap = new Map<number, string>();
+
+    // 1차: 공통 보기(※) 블록 파싱
+    $(`span.alla6QuestionNo, span.allaQuestionNo`).each((_, element) => {
+      const $span = $(element);
+      const questionNoText = $span.text().trim();
+
+      if (questionNoText === '※') {
+        const $parentTbody = $span.closest('tbody');
+        const $parentTd = $span.closest('td');
+        const fullText = $parentTd.text().trim();
+
+        console.log(`  🔍 공통 보기 후보 발견: "${fullText.substring(0, 50)}..."`);
+
+        // "(3~4)", "(3∼4)", "(38∼39)" 등의 구간 패턴 추출 (앞이든 뒤든 상관없이)
+        const rangeMatch = fullText.match(/\((\d+)\s*[~∼～\-–—]\s*(\d+)\)/);
+        if (rangeMatch) {
+          const startNum = parseInt(rangeMatch[1]);
+          const endNum = parseInt(rangeMatch[2]);
+
+          // 공통 보기 텍스트 (마커 없이)
+          let sharedText = fullText.replace('※', '').trim();
+
+          // 공통 보기의 코드 블록 추출 - pre 태그
+          const exampleSrcRow = $parentTbody.find('tr.alla6ExampleTr_Src, tr.allaExampleTr_Src');
+          if (exampleSrcRow.length > 0) {
+            const $pre = exampleSrcRow.find('td pre');
+            const codeText = $pre.text().trim();
+            const lang = $pre.attr('data-ke-language') || $pre.attr('class')?.split(' ')[0] || '';
+            if (codeText) {
+              sharedText = `${sharedText}\n\n\`\`\`${lang}\n${codeText}\n\`\`\``;
+            }
+          }
+
+          // 공통 보기의 코드 블록 추출 - div 형태 (allaExampleList_bleft_*)
+          const exampleTxtRow = $parentTbody.find('tr.alla6ExampleTr_Txt, tr.allaExampleTr_Txt');
+          if (exampleTxtRow.length > 0) {
+            // 방법 1: allaExampleList_p (일반 텍스트)
+            const exampleP = exampleTxtRow.find('.allaExampleList_p');
+            if (exampleP.length > 0) {
+              const txtContent = exampleP.text().trim();
+              if (txtContent) {
+                sharedText = `${sharedText}\n\n${txtContent}`;
+              }
+            }
+            
+            // 방법 2: allaExampleList_bleft_* (div 코드 형태)
+            const exampleDivs = exampleTxtRow.find('div[class^="allaExampleList_bleft"]');
+            if (exampleDivs.length > 0) {
+              const codeLines: string[] = [];
+              exampleDivs.each((_, div) => {
+                codeLines.push($(div).text());
+              });
+              const codeText = codeLines.join('\n').trim();
+              if (codeText) {
+                sharedText = `${sharedText}\n\n\`\`\`\n${codeText}\n\`\`\``;
+              }
+            }
+          }
+
+          for (let i = startNum; i <= endNum; i++) {
+            sharedExampleMap.set(i, sharedText);
+          }
+
+          console.log(`  📌 공통 보기 감지: 문제 ${startNum}~${endNum}`);
+        } else {
+          console.log(`  ⚠️  공통 보기 구간 패턴 매칭 실패: "${fullText.substring(0, 80)}"`);
+        }
+      }
+    });
+
+    // 2차: 실제 문제 데이터 추출
     questionTables.each((_, element) => {
       const table = $(element);
 
@@ -317,11 +391,79 @@ export class CrawlerService {
 
       if (isNaN(questionNumber)) return;
 
+      // 보기문 추출 (텍스트 보기) - 여러 alla6ExampleTr_Txt가 있을 수 있음
       let exampleText: string | null = null;
-      const exampleRow = table.find('tr.alla6ExampleTr_Txt .allaExampleList_p, tr.allaExampleTr_Txt .allaExampleList_p');
-      if (exampleRow.length > 0) {
-        exampleText = exampleRow.text().trim();
+      const exampleParts: string[] = [];
+      
+      table.find('tr.alla6ExampleTr_Txt, tr.allaExampleTr_Txt').each((_, row) => {
+        const $row = $(row);
+        const $td = $row.find('td');
+        
+        // 방법 1: allaExampleList_p 클래스 (일반 텍스트 보기)
+        const exampleP = $td.find('.allaExampleList_p');
+        if (exampleP.length > 0) {
+          exampleParts.push(exampleP.text().trim());
+        }
+        
+        // 방법 2: allaExampleList_bleft_* 클래스 (코드 형태 - div로 들여쓰기된 코드)
+        const exampleBleft = $td.find('div[class^="allaExampleList_bleft"]');
+        if (exampleBleft.length > 0) {
+          const codeLines: string[] = [];
+          exampleBleft.each((_, div) => {
+            codeLines.push($(div).text());
+          });
+          const codeText = codeLines.join('\n').trim();
+          if (codeText) {
+            exampleParts.push(`\`\`\`\n${codeText}\n\`\`\``);
+          }
+        }
+        
+        // 방법 3: allaExampleList_eng 클래스 (영문 보기 목록 - a, b, c, d)
+        const exampleEng = $td.find('.allaExampleList_eng');
+        if (exampleEng.length > 0) {
+          const engLines: string[] = [];
+          exampleEng.each((_, div) => {
+            engLines.push($(div).text().trim());
+          });
+          if (engLines.length > 0) {
+            exampleParts.push(engLines.join('\n'));
+          }
+        }
+        
+        // 방법 4: span.ibold (강조 텍스트, 메소드 시그니처 등)
+        const exampleBold = $td.find('span.ibold');
+        if (exampleBold.length > 0 && exampleP.length === 0 && exampleBleft.length === 0 && exampleEng.length === 0) {
+          // 다른 형태가 없을 때만 ibold 추출 (중복 방지)
+          exampleParts.push(exampleBold.text().trim());
+        }
+        
+        // 방법 5: 위 형태가 모두 없으면 td 전체 텍스트
+        if (exampleP.length === 0 && exampleBleft.length === 0 && exampleEng.length === 0 && exampleBold.length === 0) {
+          const rawText = $td.text().trim();
+          if (rawText) {
+            exampleParts.push(rawText);
+          }
+        }
+      });
+      
+      if (exampleParts.length > 0) {
+        exampleText = exampleParts.join('\n\n');
       }
+
+      // 보기 코드 추출 (소스 코드 - pre 태그, 마커 포함)
+      const exampleSrcRow = table.find('tr.alla6ExampleTr_Src, tr.allaExampleTr_Src');
+      if (exampleSrcRow.length > 0) {
+        const $pre = exampleSrcRow.find('td pre');
+        const codeText = $pre.text().trim();
+        const lang = $pre.attr('data-ke-language') || $pre.attr('class')?.split(' ')[0] || '';
+        if (codeText) {
+          const codeBlock = `\`\`\`${lang}\n${codeText}\n\`\`\``;
+          exampleText = exampleText ? `${exampleText}\n\n${codeBlock}` : codeBlock;
+        }
+      }
+
+      // 공통 보기는 별도 필드로 저장
+      const sharedExample = sharedExampleMap.get(questionNumber) || null;
 
       const questionRow = table.find(`tr.${questionRowClass} td`);
       const fullText = questionRow.text().trim();
@@ -370,6 +512,7 @@ export class CrawlerService {
         questionNumber,
         questionText,
         exampleText,
+        sharedExample,
         questionImageUrls,
         choices
       });
@@ -619,6 +762,7 @@ export class CrawlerService {
           question_number: questionData.questionNumber,
           question_text: questionData.questionText,
           example_text: questionData.exampleText,
+          shared_example: questionData.sharedExample,
           question_image_urls: questionData.questionImageUrls,
           correct_answers: correctAnswers,
           choices: questionData.choices
@@ -647,8 +791,9 @@ export class CrawlerService {
     forceRetry?: boolean;
     subjectFilter?: string[]; // 특정 과목만 크롤링
     delay?: number; // 요청 간 딜레이 (ms)
+    startIndex?: number; // 시작 과목 인덱스 (0부터 시작)
   } = {}) {
-    const { forceRetry = false, subjectFilter = [], delay = 1000 } = options;
+    const { forceRetry = false, subjectFilter = [], delay = 1000, startIndex = 0 } = options;
 
     // 1단계: 과목 목록 수집
     let subjects = await this.getSubjectLinks(mainUrl);
@@ -664,8 +809,14 @@ export class CrawlerService {
     const errorLogs: CrawlErrorLog[] = [];
     const failedUrls: string[] = [];
 
+    // 시작 인덱스 적용
+    const actualStartIndex = Math.max(0, Math.min(startIndex, subjects.length - 1));
+    if (actualStartIndex > 0) {
+      console.log(`📍 ${actualStartIndex}번째 과목부터 시작 (${actualStartIndex}개 건너뜀)`);
+    }
+
     // 2단계: 각 과목별로 처리
-    for (let i = 0; i < subjects.length; i++) {
+    for (let i = actualStartIndex; i < subjects.length; i++) {
       const subject = subjects[i];
       console.log(`\n[${i + 1}/${subjects.length}] 📖 과목: ${subject.name}`);
 
