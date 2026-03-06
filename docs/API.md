@@ -412,8 +412,8 @@ void main() {
 ```
 
 프론트엔드 렌더링 가이드:
-1. ` ```언어명 ` ~ ` ``` ` 패턴을 정규식으로 파싱
-2. 코드 블록은 `<pre><code>` 태그로 렌더링 (syntax highlighting 권장)
+1. ` ```언어명 ` ~ ` ``` ` 패턴을 정규식으로 파싱 (언어명은 없을 수 있음: ` ``` `)
+2. 코드 블록은 `<pre><code>` 태그로 렌더링 (언어명이 있으면 syntax highlighting 적용)
 3. 나머지 텍스트는 `white-space: pre-wrap` 스타일 적용
 
 React 파싱 예시:
@@ -441,6 +441,24 @@ function ExampleText({ text }: { text: string }) {
   );
 }
 ```
+
+**sharedExample 필드 (공통 보기)**
+
+여러 문제가 공유하는 공통 보기가 있는 경우 `sharedExample` 필드에 저장됩니다.
+`example` 필드와 동일하게 코드 블록이 포함될 수 있으며, 같은 방식으로 파싱하면 됩니다.
+
+예시:
+```json
+{
+  "sharedExample": "(3~4) 다음과 같은 프로그램이 있을 때 물음에 답하시오.\n\n```cpp\n#include <stdio.h>\nvoid main() {\n  char var='A';\n  printf(\"var1=%d var2=%c\", var, var);\n}\n```",
+  "example": null
+}
+```
+
+프론트엔드 렌더링 가이드:
+1. `sharedExample`이 있으면 문제 위에 별도 영역으로 표시
+2. `example`과 동일한 코드 블록 파싱 로직 적용
+3. 같은 공통 보기를 공유하는 연속 문제들은 UI에서 그룹핑 고려
 
 **Status**
 
