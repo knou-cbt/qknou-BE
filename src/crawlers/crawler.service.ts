@@ -345,7 +345,7 @@ export class CrawlerService {
             }
           }
 
-          // 공통 보기의 코드 블록 추출 - div 형태 (allaExampleList_bleft_*)
+          // 공통 보기의 내용 추출
           const exampleTxtRow = $parentTbody.find('tr.alla6ExampleTr_Txt, tr.allaExampleTr_Txt');
           if (exampleTxtRow.length > 0) {
             // 방법 1: allaExampleList_p (일반 텍스트)
@@ -367,6 +367,15 @@ export class CrawlerService {
               const codeText = codeLines.join('\n').trim();
               if (codeText) {
                 sharedText = `${sharedText}\n\n\`\`\`\n${codeText}\n\`\`\``;
+              }
+            }
+            
+            // 방법 3: allaExampleAlign_center (중앙 정렬 텍스트, 흐름도 등)
+            const exampleCenter = exampleTxtRow.find('.allaExampleAlign_center');
+            if (exampleCenter.length > 0) {
+              const centerContent = exampleCenter.text().trim();
+              if (centerContent) {
+                sharedText = `${sharedText}\n\n${centerContent}`;
               }
             }
           }
@@ -430,15 +439,24 @@ export class CrawlerService {
           }
         }
         
-        // 방법 4: span.ibold (강조 텍스트, 메소드 시그니처 등)
+        // 방법 4: allaExampleAlign_center (중앙 정렬 텍스트, 흐름도 등)
+        const exampleCenter = $td.find('.allaExampleAlign_center');
+        if (exampleCenter.length > 0) {
+          const centerContent = exampleCenter.text().trim();
+          if (centerContent) {
+            exampleParts.push(centerContent);
+          }
+        }
+        
+        // 방법 5: span.ibold (강조 텍스트, 메소드 시그니처 등)
         const exampleBold = $td.find('span.ibold');
-        if (exampleBold.length > 0 && exampleP.length === 0 && exampleBleft.length === 0 && exampleEng.length === 0) {
+        if (exampleBold.length > 0 && exampleP.length === 0 && exampleBleft.length === 0 && exampleEng.length === 0 && exampleCenter.length === 0) {
           // 다른 형태가 없을 때만 ibold 추출 (중복 방지)
           exampleParts.push(exampleBold.text().trim());
         }
         
-        // 방법 5: 위 형태가 모두 없으면 td 전체 텍스트
-        if (exampleP.length === 0 && exampleBleft.length === 0 && exampleEng.length === 0 && exampleBold.length === 0) {
+        // 방법 6: 위 형태가 모두 없으면 td 전체 텍스트
+        if (exampleP.length === 0 && exampleBleft.length === 0 && exampleEng.length === 0 && exampleCenter.length === 0 && exampleBold.length === 0) {
           const rawText = $td.text().trim();
           if (rawText) {
             exampleParts.push(rawText);

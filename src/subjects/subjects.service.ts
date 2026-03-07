@@ -150,10 +150,19 @@ export class SubjectsService implements OnModuleInit {
 
   /**
    *  특정 과목의 시험지 목록 조회 (최적화: QueryBuilder 사용)
+   *  과목은 있으나 시험지가 없으면 빈 배열 반환 (404 아님)
    *  @param subjectId - 과목 ID
    */
   async findExamsBySubject(subjectId: number) {
-    // QueryBuilder로 필요한 필드만 선택 (1번 쿼리로 처리)
+    // 과목 존재 여부 확인 (없으면 404)
+    const subject = await this.subjectRepository.findOne({
+      where: { id: subjectId },
+      select: ['id'],
+    });
+    if (!subject) {
+      throw new NotFoundException(`과목 id ${subjectId}를 찾을 수 없습니다.`);
+    }
+
     const exams = await this.examRepository
       .createQueryBuilder('exam')
       .select(['exam.id', 'exam.title', 'exam.year', 'exam.exam_type'])
@@ -161,11 +170,6 @@ export class SubjectsService implements OnModuleInit {
       .orderBy('exam.year', 'DESC')
       .addOrderBy('exam.exam_type', 'ASC')
       .getMany();
-
-    // 시험지가 없으면 404
-    if (exams.length === 0) {
-      throw new NotFoundException(`과목 id ${subjectId}의 시험지를 찾을 수 없습니다.`)
-    }
 
     return exams.map(exam => ({
       id: exam.id,
