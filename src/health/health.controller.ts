@@ -61,9 +61,9 @@ export class HealthController {
       const poolStatus = {
         name: 'connection_pool',
         description: 'Current pool status',
-        // @ts-ignore - TypeORM 내부 속성 접근
+        // @ts-expect-error - TypeORM 내부 속성 접근
         active: this.dataSource.driver?.master?.totalCount || 'N/A',
-        // @ts-ignore
+        // @ts-expect-error - TypeORM 내부 속성 접근
         idle: this.dataSource.driver?.master?.idleCount || 'N/A',
       };
       results.tests.push(poolStatus);

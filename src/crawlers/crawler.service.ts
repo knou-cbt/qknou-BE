@@ -90,7 +90,7 @@ export class CrawlerService {
       try {
         const content = fs.readFileSync(logFile, 'utf-8');
         logs = JSON.parse(content);
-      } catch (_error) {
+      } catch {
         console.warn('⚠️  기존 로그 파일 읽기 실패, 새로 생성합니다.');
       }
     }
@@ -594,7 +594,7 @@ export class CrawlerService {
 
           try {
             answerMap.set(actualQuestionNo, this.parseCorrectAnswers(answerText));
-          } catch (_error) {
+          } catch {
             console.warn(`  ⚠️  문제 ${actualQuestionNo} 정답 파싱 실패: ${answerText}`);
           }
         }
@@ -620,7 +620,7 @@ export class CrawlerService {
           if (!isNaN(questionNo) && answerText) {
             try {
               answerMap.set(questionNo, this.parseCorrectAnswers(answerText));
-            } catch (_error) {
+            } catch {
               console.warn(`  ⚠️  문제 ${questionNo} 정답 파싱 실패: ${answerText}`);
             }
           }
@@ -647,7 +647,7 @@ export class CrawlerService {
             try {
               const answers = this.parseCorrectAnswers(char);
               answerMap.set(questionNo, answers);
-            } catch (_error) {
+            } catch {
               console.warn(`  ⚠️  문제 ${questionNo} 정답 파싱 실패: ${char}`);
             }
           }

@@ -5,7 +5,6 @@ import { Questsion } from 'src/questions/entities/question.entity';
 import { SubjectsService } from 'src/subjects/subjects.service';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { Subject } from 'rxjs';
 import { InjectRepository } from '@nestjs/typeorm';
 import { TutorService } from 'src/tutor/tutor.service';
 
@@ -344,7 +343,6 @@ export class ExamsService {
     }
 
     const examType = this.parseExamType(examTypeText);
-    const yearText = year ? `${year}년도` : '연도 미상';
     const title = subjectName;  // title에는 과목명만 저장 (year, exam_type은 별도 컬럼으로 관리)
 
     console.log(`  - 과목: ${subjectName}`);
@@ -573,7 +571,7 @@ export class ExamsService {
         if (!isNaN(questionNo) && answerText) {
           try {
             answerMap.set(questionNo, this.parseCorrectAnswers(answerText));
-          } catch (error) {
+          } catch {
             console.warn(`  ⚠️  문제 ${questionNo} 정답 파싱 실패: ${answerText}`);
           }
         }
@@ -596,7 +594,7 @@ export class ExamsService {
           try {
             const answers = this.parseCorrectAnswers(char);
             answerMap.set(questionNo, answers);
-          } catch (error) {
+          } catch {
             console.warn(`  ⚠️  문제 ${questionNo} 정답 파싱 실패: ${char}`);
           }
         }
