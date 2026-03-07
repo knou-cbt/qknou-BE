@@ -287,7 +287,7 @@ term_candidates 규칙:
 
     async recommendQuestions(
         termCandidates: string[],
-        subjectId: number,
+        _subjectId: number,
         excludeQuestionId?: number,
         limit: number = 5,
     ): Promise<Array<{ id: number; questionNumber: number; text: string; examTitle: string; year: number }>> {

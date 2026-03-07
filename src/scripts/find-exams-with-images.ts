@@ -2,7 +2,6 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
 import { DataSource } from 'typeorm';
 import { Questsion } from '../questions/entities/question.entity';
-import { retry } from 'rxjs';
 
 async function bootstrap() {
     console.log('NestJS 애플리케이션 초기화 중...');

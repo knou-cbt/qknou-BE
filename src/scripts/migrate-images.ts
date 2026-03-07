@@ -128,7 +128,7 @@ async function bootstrap() {
             if (fs.existsSync(logFile)) {
                 try {
                     existingLogs = JSON.parse(fs.readFileSync(logFile, 'utf-8'));
-                } catch (e) { }
+                } catch { }
             }
             fs.writeFileSync(logFile, JSON.stringify([...existingLogs, ...failedLogs], null, 2));
             console.log(`📝 실패 로그 저장 위치: ${logFile}`);
