@@ -30,8 +30,9 @@ jobs:
       - name: Run lint
         run: yarn lint
 
-      - name: Run tests
-        run: yarn test
+      # TODO: 테스트 작성 후 활성화
+      # - name: Run tests
+      #   run: yarn test
 
       - name: Build project
         run: yarn build
