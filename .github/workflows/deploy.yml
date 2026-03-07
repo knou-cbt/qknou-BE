@@ -1,0 +1,44 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            # 프로젝트 디렉토리로 이동
+            cd ~/qknou-BE
+            
+            # 최신 코드 가져오기
+            git pull origin main
+            
+            # 의존성 설치
+            yarn install --frozen-lockfile
+            
+            # 기존 deploy 스크립트 실행
+            bash ./deploy.sh
+            
+            # PM2 상태 저장
+            pm2 save
+
+      - name: Deployment notification
+        if: success()
+        run: echo "✅ Deployment successful!"
+
+      - name: Deployment failed
+        if: failure()
+        run: echo "❌ Deployment failed!"
