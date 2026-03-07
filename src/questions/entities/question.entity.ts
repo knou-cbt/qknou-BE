@@ -1,5 +1,13 @@
-import { Exam } from "src/exams/entities/exam.entity";
-import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import { Exam } from 'src/exams/entities/exam.entity';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 
 @Entity('questions')
 @Index('IDX_questions_exam_id', ['exam_id'])

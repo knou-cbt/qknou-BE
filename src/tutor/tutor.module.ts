@@ -7,9 +7,9 @@ import { Term } from './entities/term.entity';
 import { Exam } from 'src/exams/entities/exam.entity';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Questsion, Term, Exam])],
-    controllers: [TutorController],
-    providers: [TutorService],
-    exports: [TutorService]
+  imports: [TypeOrmModule.forFeature([Questsion, Term, Exam])],
+  controllers: [TutorController],
+  providers: [TutorService],
+  exports: [TutorService],
 })
-export class TutorModule { }
+export class TutorModule {}

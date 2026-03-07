@@ -35,10 +35,7 @@ function encodePasswordInUrl(url: string): string {
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [
-        `.env.${process.env.NODE_ENV || 'development'}`,
-        '.env'
-      ],
+      envFilePath: [`.env.${process.env.NODE_ENV || 'development'}`, '.env'],
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -69,10 +66,10 @@ function encodePasswordInUrl(url: string): string {
               rejectUnauthorized: false,
             },
             // Connection Pool 최적화
-            max: 20,              // 최대 연결 수
-            min: 5,               // 최소 유지 연결 수
-            idleTimeoutMillis: 30000,  // 유휴 연결 타임아웃 (30초)
-            connectionTimeoutMillis: 10000,  // 연결 대기 타임아웃 (10초)
+            max: 20, // 최대 연결 수
+            min: 5, // 최소 유지 연결 수
+            idleTimeoutMillis: 30000, // 유휴 연결 타임아웃 (30초)
+            connectionTimeoutMillis: 10000, // 연결 대기 타임아웃 (10초)
           },
         };
       },
@@ -91,4 +88,4 @@ function encodePasswordInUrl(url: string): string {
   controllers: [AppController],
   providers: [],
 })
-export class AppModule { }
+export class AppModule {}

@@ -22,16 +22,6 @@
   <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
   [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
 
-## Description
-
-방송대 기출문제 크롤링 및 관리 시스템
-
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## 📚 Documentation
-
-- [크롤링 가이드](./CRAWLING_GUIDE.md)
-- [성능 벤치마크](./BENCHMARK.md) - JSONB vs 별도 테이블 비교
 
 ## Project setup
 
@@ -52,44 +42,53 @@ $ yarn run start:dev
 $ yarn run start:prod
 ```
 
-## Run tests
 
-```bash
-# unit tests
-$ yarn run test
 
-# e2e tests
-$ yarn run test:e2e
 
-# test coverage
-$ yarn run test:cov
-
-# benchmark (SELECT 성능 측정)
-$ yarn run benchmark
-```
-
-## Crawling
-
-```bash
-# 시험 크롤링
-$ yarn crawl <URL>
-
-# 재시도 (기존 데이터 삭제 후 재크롤링)
-$ yarn crawl <URL> --retry
-```
 
 ## Deployment
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+This project uses GitHub Actions for CI/CD automation.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### GitHub Secrets Setup
+
+Configure the following secrets in your GitHub repository (Settings → Secrets and variables → Actions):
+
+| Secret Name | Description | Example |
+|------------|-------------|---------|
+| `SERVER_HOST` | EC2 Public IP or domain | `13.124.xxx.xxx` |
+| `SERVER_USER` | SSH username | `ec2-user` |
+| `SSH_PRIVATE_KEY` | SSH private key (PEM) | Full content of `.pem` file |
+
+### Workflows
+
+- **CI** (`.github/workflows/ci.yml`): Runs on PR and develop branch pushes
+  - Linting
+  - Testing
+  - Build verification
+
+- **Deploy** (`.github/workflows/deploy.yml`): Runs on main branch pushes
+  - Deploys to EC2
+  - Runs existing `deploy.sh` script
+
+### Manual Deployment
 
 ```bash
-$ yarn install -g mau
-$ mau deploy
-```
+# SSH into EC2
+ssh -i your-key.pem ec2-user@your-ec2-ip
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+# Navigate to project
+cd ~/qknou-BE
+
+# Pull latest changes
+git pull origin main
+
+# Install dependencies
+yarn install
+
+# Run deploy script
+bash ./deploy.sh
+```
 
 ## Resources
 

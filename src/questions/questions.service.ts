@@ -12,7 +12,7 @@ export class QuestionsService {
 
   async findByExamId(examId: number): Promise<Questsion[]> {
     return this.questionRepository.find({
-      where: { exam_id: examId }
+      where: { exam_id: examId },
     });
   }
 }

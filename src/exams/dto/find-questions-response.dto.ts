@@ -7,7 +7,10 @@ export class ChoiceDto {
   @ApiProperty({ description: '선택지 번호 (1~4)', example: 1 })
   number: number;
 
-  @ApiProperty({ description: '선택지 텍스트', example: '비피압대수층(unconfined aquifer)의 지하수를 천층수라 한다.' })
+  @ApiProperty({
+    description: '선택지 텍스트',
+    example: '비피압대수층(unconfined aquifer)의 지하수를 천층수라 한다.',
+  })
   text: string;
 
   @ApiPropertyOptional({
@@ -36,10 +39,13 @@ export class QuestionDto {
   example: string | null;
 
   @ApiPropertyOptional({
-    description: '문제에 첨부된 이미지 URL 배열 (문장 중간/보기 그림 등, 없으면 null)',
+    description:
+      '문제에 첨부된 이미지 URL 배열 (문장 중간/보기 그림 등, 없으면 null)',
     type: [String],
     nullable: true,
-    example: ['https://example.com/crawled-images/exam_2019_sub_과목명_q_37_img0_1234567890.png'],
+    example: [
+      'https://example.com/crawled-images/exam_2019_sub_과목명_q_37_img0_1234567890.png',
+    ],
   })
   imageUrls: string[] | null;
 
@@ -109,7 +115,8 @@ export class FindQuestionsResponseDto {
   exam: ExamInfoDto;
 
   @ApiProperty({
-    description: '문제 목록 (test 모드: 기본 필드만, study 모드: correctAnswers, explanation 포함)',
+    description:
+      '문제 목록 (test 모드: 기본 필드만, study 모드: correctAnswers, explanation 포함)',
     type: [QuestionDto],
   })
   questions: QuestionDto[] | QuestionStudyDto[];

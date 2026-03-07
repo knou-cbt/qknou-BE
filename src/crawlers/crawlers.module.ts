@@ -17,9 +17,11 @@ import { CrawlerService } from './crawler.service';
   ],
   providers: [
     //이 모듈에서 제공하는 서비스
-    CrawlerService],
+    CrawlerService,
+  ],
   exports: [
-    //다른 모듈에서도 사용할 수 있도록 export 
-    CrawlerService]
+    //다른 모듈에서도 사용할 수 있도록 export
+    CrawlerService,
+  ],
 })
-export class CrawlersModule { }
+export class CrawlersModule {}
