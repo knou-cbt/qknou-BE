@@ -47,7 +47,7 @@ export class AuthController {
     
     // 3. 이제 여기가 실행됨!
     // req.user에는 GoogleStrategy에서 반환한 user 객체가 담겨있음
-    const { access_token, user } = await this.authService.login(req.user);
+    const { access_token } = await this.authService.login(req.user);
     
     // 프론트엔드로 리다이렉트하면서 토큰을 쿼리 파라미터로 전달
     res.redirect(`${getFrontendUrl()}/auth/success?token=${access_token}`);
@@ -72,7 +72,7 @@ export class AuthController {
   @Get('kakao/callback')
   @UseGuards(AuthGuard('kakao'))
   async kakaoAuthCallback(@Req() req, @Res() res: Response) {
-    const { access_token, user } = await this.authService.login(req.user);
+    const { access_token } = await this.authService.login(req.user);
     res.redirect(`${getFrontendUrl()}/auth/success?token=${access_token}`);
   }
 
