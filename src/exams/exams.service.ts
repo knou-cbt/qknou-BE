@@ -7,6 +7,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { InjectRepository } from '@nestjs/typeorm';
 import { TutorService } from 'src/tutor/tutor.service';
+import { formatCodeBlocks } from 'src/common/utils/code-formatter.util';
 
 /**
  * 복수 정답 매핑 테이블
@@ -120,8 +121,12 @@ export class ExamsService {
           id: question.id,
           number: question.question_number,
           text: question.question_text,
-          example: question.example_text,
-          sharedExample: question.shared_example,
+          example: question.example_text
+            ? formatCodeBlocks(question.example_text)
+            : question.example_text,
+          sharedExample: question.shared_example
+            ? formatCodeBlocks(question.shared_example)
+            : question.shared_example,
           imageUrls: question.question_image_urls,
           choices: question.choices,
         };
