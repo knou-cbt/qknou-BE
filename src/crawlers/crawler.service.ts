@@ -17,9 +17,17 @@ import * as path from 'path';
  * 예: 'A' = [1, 2] (1번과 2번 모두 정답)
  */
 const MULTIPLE_ANSWER_MAP: Record<string, number[]> = {
-  'A': [1, 2], 'B': [1, 3], 'C': [1, 4], 'D': [2, 3],
-  'E': [2, 4], 'F': [3, 4], 'G': [1, 2, 3], 'H': [1, 2, 4],
-  'I': [1, 3, 4], 'J': [2, 3, 4], 'K': [1, 2, 3, 4]
+  A: [1, 2],
+  B: [1, 3],
+  C: [1, 4],
+  D: [2, 3],
+  E: [2, 4],
+  F: [3, 4],
+  G: [1, 2, 3],
+  H: [1, 2, 4],
+  I: [1, 3, 4],
+  J: [2, 3, 4],
+  K: [1, 2, 3, 4],
 };
 
 /**
@@ -32,7 +40,7 @@ interface CrawlErrorLog {
   errorType: 'subject' | 'exam' | 'parsing' | 'missing_answer';
   errorMessage: string;
   stackTrace?: string;
-  skippedQuestions?: number[];  // 건너뛴 문제 번호들
+  skippedQuestions?: number[]; // 건너뛴 문제 번호들
 }
 
 /**
@@ -55,14 +63,13 @@ export class CrawlerService {
     this.ensureLogDirectory();
   }
 
-
-  //TODO 메서드들 추가 
+  //TODO 메서드들 추가
 
   /**
    * 유틸리티: 대기 함수(서버 부담 감소)
    */
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -112,7 +119,10 @@ export class CrawlerService {
 
     const dateStr = new Date().toISOString().split('T')[0];
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const urlFile = path.join(this.LOG_DIR, `failed-urls-${dateStr}-${timestamp}.txt`);
+    const urlFile = path.join(
+      this.LOG_DIR,
+      `failed-urls-${dateStr}-${timestamp}.txt`,
+    );
 
     // URL 목록을 한 줄씩 저장
     fs.writeFileSync(urlFile, urls.join('\n'), 'utf-8');
@@ -142,17 +152,35 @@ export class CrawlerService {
   /**
    * 1단계: 메인 페이지에서 과목 링크 목록 추출
    */
-  async getSubjectLinks(mainUrl: string): Promise<Array<{ name: string, url: string }>> {
+  async getSubjectLinks(
+    mainUrl: string,
+  ): Promise<Array<{ name: string; url: string }>> {
     console.log('📚 과목 목록 수집 중...');
 
     // HTML 다운로드
     const { data: html } = await axios.get(mainUrl);
     const $ = cheerio.load(html);
 
-    const subjects: Array<{ name: string, url: string }> = [];
+    const subjects: Array<{ name: string; url: string }> = [];
 
     // 제외할 구분 문자들 (가, 나, 다, ...)
-    const excludeTexts = ['가', '나', '다', '라', '마', '바', '사', '아', '자', '차', '카', '타', '파', '하', '기타'];
+    const excludeTexts = [
+      '가',
+      '나',
+      '다',
+      '라',
+      '마',
+      '바',
+      '사',
+      '아',
+      '자',
+      '차',
+      '카',
+      '타',
+      '파',
+      '하',
+      '기타',
+    ];
 
     // ul#allaGmObjectList 안의 모든 li > a 태그 순회
     $('#allaGmObjectList li a').each((_, element) => {
@@ -231,7 +259,14 @@ export class CrawlerService {
       questionCount = questionCountMatch ? parseInt(questionCountMatch[1]) : 0;
 
       subjectName = alla6InfoTable.find('tr').eq(1).find('td').text().trim();
-      examTypeText = alla6InfoTable.find('tr').eq(2).find('td').text().replace('시험종류', '').replace(':', '').trim();
+      examTypeText = alla6InfoTable
+        .find('tr')
+        .eq(2)
+        .find('td')
+        .text()
+        .replace('시험종류', '')
+        .replace(':', '')
+        .trim();
     } else {
       console.log('  📌 기본 tbody 버전 감지');
 
@@ -323,7 +358,9 @@ export class CrawlerService {
         const $parentTd = $span.closest('td');
         const fullText = $parentTd.text().trim();
 
-        console.log(`  🔍 공통 보기 후보 발견: "${fullText.substring(0, 50)}..."`);
+        console.log(
+          `  🔍 공통 보기 후보 발견: "${fullText.substring(0, 50)}..."`,
+        );
 
         // "(3~4)", "(3∼4)", "(38∼39)" 등의 구간 패턴 추출 (앞이든 뒤든 상관없이)
         const rangeMatch = fullText.match(/\((\d+)\s*[~∼～\-–—]\s*(\d+)\)/);
@@ -335,18 +372,25 @@ export class CrawlerService {
           let sharedText = fullText.replace('※', '').trim();
 
           // 공통 보기의 코드 블록 추출 - pre 태그
-          const exampleSrcRow = $parentTbody.find('tr.alla6ExampleTr_Src, tr.allaExampleTr_Src');
+          const exampleSrcRow = $parentTbody.find(
+            'tr.alla6ExampleTr_Src, tr.allaExampleTr_Src',
+          );
           if (exampleSrcRow.length > 0) {
             const $pre = exampleSrcRow.find('td pre');
             const codeText = $pre.text().trim();
-            const lang = $pre.attr('data-ke-language') || $pre.attr('class')?.split(' ')[0] || '';
+            const lang =
+              $pre.attr('data-ke-language') ||
+              $pre.attr('class')?.split(' ')[0] ||
+              '';
             if (codeText) {
               sharedText = `${sharedText}\n\n\`\`\`${lang}\n${codeText}\n\`\`\``;
             }
           }
 
           // 공통 보기의 내용 추출
-          const exampleTxtRow = $parentTbody.find('tr.alla6ExampleTr_Txt, tr.allaExampleTr_Txt');
+          const exampleTxtRow = $parentTbody.find(
+            'tr.alla6ExampleTr_Txt, tr.allaExampleTr_Txt',
+          );
           if (exampleTxtRow.length > 0) {
             // 방법 1: allaExampleList_p (일반 텍스트)
             const exampleP = exampleTxtRow.find('.allaExampleList_p');
@@ -356,9 +400,11 @@ export class CrawlerService {
                 sharedText = `${sharedText}\n\n${txtContent}`;
               }
             }
-            
+
             // 방법 2: allaExampleList_bleft_* (div 코드 형태)
-            const exampleDivs = exampleTxtRow.find('div[class^="allaExampleList_bleft"]');
+            const exampleDivs = exampleTxtRow.find(
+              'div[class^="allaExampleList_bleft"]',
+            );
             if (exampleDivs.length > 0) {
               const codeLines: string[] = [];
               exampleDivs.each((_, div) => {
@@ -369,9 +415,11 @@ export class CrawlerService {
                 sharedText = `${sharedText}\n\n\`\`\`\n${codeText}\n\`\`\``;
               }
             }
-            
+
             // 방법 3: allaExampleAlign_center (중앙 정렬 텍스트, 흐름도 등)
-            const exampleCenter = exampleTxtRow.find('.allaExampleAlign_center');
+            const exampleCenter = exampleTxtRow.find(
+              '.allaExampleAlign_center',
+            );
             if (exampleCenter.length > 0) {
               const centerContent = exampleCenter.text().trim();
               if (centerContent) {
@@ -386,7 +434,9 @@ export class CrawlerService {
 
           console.log(`  📌 공통 보기 감지: 문제 ${startNum}~${endNum}`);
         } else {
-          console.log(`  ⚠️  공통 보기 구간 패턴 매칭 실패: "${fullText.substring(0, 80)}"`);
+          console.log(
+            `  ⚠️  공통 보기 구간 패턴 매칭 실패: "${fullText.substring(0, 80)}"`,
+          );
         }
       }
     });
@@ -403,80 +453,101 @@ export class CrawlerService {
       // 보기문 추출 (텍스트 보기) - 여러 alla6ExampleTr_Txt가 있을 수 있음
       let exampleText: string | null = null;
       const exampleParts: string[] = [];
-      
-      table.find('tr.alla6ExampleTr_Txt, tr.allaExampleTr_Txt').each((_, row) => {
-        const $row = $(row);
-        const $td = $row.find('td');
-        
-        // 방법 1: allaExampleList_p 클래스 (일반 텍스트 보기)
-        const exampleP = $td.find('.allaExampleList_p');
-        if (exampleP.length > 0) {
-          exampleParts.push(exampleP.text().trim());
-        }
-        
-        // 방법 2: allaExampleList_bleft_* 클래스 (코드 형태 - div로 들여쓰기된 코드)
-        const exampleBleft = $td.find('div[class^="allaExampleList_bleft"]');
-        if (exampleBleft.length > 0) {
-          const codeLines: string[] = [];
-          exampleBleft.each((_, div) => {
-            codeLines.push($(div).text());
-          });
-          const codeText = codeLines.join('\n').trim();
-          if (codeText) {
-            exampleParts.push(`\`\`\`\n${codeText}\n\`\`\``);
+
+      table
+        .find('tr.alla6ExampleTr_Txt, tr.allaExampleTr_Txt')
+        .each((_, row) => {
+          const $row = $(row);
+          const $td = $row.find('td');
+
+          // 방법 1: allaExampleList_p 클래스 (일반 텍스트 보기)
+          const exampleP = $td.find('.allaExampleList_p');
+          if (exampleP.length > 0) {
+            exampleParts.push(exampleP.text().trim());
           }
-        }
-        
-        // 방법 3: allaExampleList_eng 클래스 (영문 보기 목록 - a, b, c, d)
-        const exampleEng = $td.find('.allaExampleList_eng');
-        if (exampleEng.length > 0) {
-          const engLines: string[] = [];
-          exampleEng.each((_, div) => {
-            engLines.push($(div).text().trim());
-          });
-          if (engLines.length > 0) {
-            exampleParts.push(engLines.join('\n'));
+
+          // 방법 2: allaExampleList_bleft_* 클래스 (코드 형태 - div로 들여쓰기된 코드)
+          const exampleBleft = $td.find('div[class^="allaExampleList_bleft"]');
+          if (exampleBleft.length > 0) {
+            const codeLines: string[] = [];
+            exampleBleft.each((_, div) => {
+              codeLines.push($(div).text());
+            });
+            const codeText = codeLines.join('\n').trim();
+            if (codeText) {
+              exampleParts.push(`\`\`\`\n${codeText}\n\`\`\``);
+            }
           }
-        }
-        
-        // 방법 4: allaExampleAlign_center (중앙 정렬 텍스트, 흐름도 등)
-        const exampleCenter = $td.find('.allaExampleAlign_center');
-        if (exampleCenter.length > 0) {
-          const centerContent = exampleCenter.text().trim();
-          if (centerContent) {
-            exampleParts.push(centerContent);
+
+          // 방법 3: allaExampleList_eng 클래스 (영문 보기 목록 - a, b, c, d)
+          const exampleEng = $td.find('.allaExampleList_eng');
+          if (exampleEng.length > 0) {
+            const engLines: string[] = [];
+            exampleEng.each((_, div) => {
+              engLines.push($(div).text().trim());
+            });
+            if (engLines.length > 0) {
+              exampleParts.push(engLines.join('\n'));
+            }
           }
-        }
-        
-        // 방법 5: span.ibold (강조 텍스트, 메소드 시그니처 등)
-        const exampleBold = $td.find('span.ibold');
-        if (exampleBold.length > 0 && exampleP.length === 0 && exampleBleft.length === 0 && exampleEng.length === 0 && exampleCenter.length === 0) {
-          // 다른 형태가 없을 때만 ibold 추출 (중복 방지)
-          exampleParts.push(exampleBold.text().trim());
-        }
-        
-        // 방법 6: 위 형태가 모두 없으면 td 전체 텍스트
-        if (exampleP.length === 0 && exampleBleft.length === 0 && exampleEng.length === 0 && exampleCenter.length === 0 && exampleBold.length === 0) {
-          const rawText = $td.text().trim();
-          if (rawText) {
-            exampleParts.push(rawText);
+
+          // 방법 4: allaExampleAlign_center (중앙 정렬 텍스트, 흐름도 등)
+          const exampleCenter = $td.find('.allaExampleAlign_center');
+          if (exampleCenter.length > 0) {
+            const centerContent = exampleCenter.text().trim();
+            if (centerContent) {
+              exampleParts.push(centerContent);
+            }
           }
-        }
-      });
-      
+
+          // 방법 5: span.ibold (강조 텍스트, 메소드 시그니처 등)
+          const exampleBold = $td.find('span.ibold');
+          if (
+            exampleBold.length > 0 &&
+            exampleP.length === 0 &&
+            exampleBleft.length === 0 &&
+            exampleEng.length === 0 &&
+            exampleCenter.length === 0
+          ) {
+            // 다른 형태가 없을 때만 ibold 추출 (중복 방지)
+            exampleParts.push(exampleBold.text().trim());
+          }
+
+          // 방법 6: 위 형태가 모두 없으면 td 전체 텍스트
+          if (
+            exampleP.length === 0 &&
+            exampleBleft.length === 0 &&
+            exampleEng.length === 0 &&
+            exampleCenter.length === 0 &&
+            exampleBold.length === 0
+          ) {
+            const rawText = $td.text().trim();
+            if (rawText) {
+              exampleParts.push(rawText);
+            }
+          }
+        });
+
       if (exampleParts.length > 0) {
         exampleText = exampleParts.join('\n\n');
       }
 
       // 보기 코드 추출 (소스 코드 - pre 태그, 마커 포함)
-      const exampleSrcRow = table.find('tr.alla6ExampleTr_Src, tr.allaExampleTr_Src');
+      const exampleSrcRow = table.find(
+        'tr.alla6ExampleTr_Src, tr.allaExampleTr_Src',
+      );
       if (exampleSrcRow.length > 0) {
         const $pre = exampleSrcRow.find('td pre');
         const codeText = $pre.text().trim();
-        const lang = $pre.attr('data-ke-language') || $pre.attr('class')?.split(' ')[0] || '';
+        const lang =
+          $pre.attr('data-ke-language') ||
+          $pre.attr('class')?.split(' ')[0] ||
+          '';
         if (codeText) {
           const codeBlock = `\`\`\`${lang}\n${codeText}\n\`\`\``;
-          exampleText = exampleText ? `${exampleText}\n\n${codeBlock}` : codeBlock;
+          exampleText = exampleText
+            ? `${exampleText}\n\n${codeBlock}`
+            : codeBlock;
         }
       }
 
@@ -494,7 +565,8 @@ export class CrawlerService {
         const src = $img.attr('src');
         if (src) questionImages.push(src);
       });
-      const questionImageUrls = questionImages.length > 0 ? questionImages : null;
+      const questionImageUrls =
+        questionImages.length > 0 ? questionImages : null;
 
       const choices: Array<{
         number: number;
@@ -522,7 +594,7 @@ export class CrawlerService {
         choices.push({
           number: choiceNumber,
           text: choiceText,
-          imageUrls: choiceImageUrls
+          imageUrls: choiceImageUrls,
         });
       });
 
@@ -532,7 +604,7 @@ export class CrawlerService {
         exampleText,
         sharedExample,
         questionImageUrls,
-        choices
+        choices,
       });
     });
 
@@ -540,8 +612,12 @@ export class CrawlerService {
 
     // 디버깅: 크롤링된 문제 번호 확인
     if (questions.length > 0) {
-      const questionNumbers = questions.map(q => q.questionNumber).sort((a, b) => a - b);
-      console.log(`  📋 크롤링된 문제 번호: ${questionNumbers.slice(0, 5).join(', ')}${questionNumbers.length > 5 ? ` ... ${questionNumbers[questionNumbers.length - 1]}` : ''}`);
+      const questionNumbers = questions
+        .map((q) => q.questionNumber)
+        .sort((a, b) => a - b);
+      console.log(
+        `  📋 크롤링된 문제 번호: ${questionNumbers.slice(0, 5).join(', ')}${questionNumbers.length > 5 ? ` ... ${questionNumbers[questionNumbers.length - 1]}` : ''}`,
+      );
     }
 
     // ========================================
@@ -571,13 +647,16 @@ export class CrawlerService {
       });
 
       // 크롤링된 문제들의 첫 번째 문제 번호
-      const firstQuestionNo = questions.length > 0 ? questions[0].questionNumber : 1;
+      const firstQuestionNo =
+        questions.length > 0 ? questions[0].questionNumber : 1;
 
       // 오프셋 계산: 테이블이 1부터 시작하면 오프셋 적용, 이미 실제 번호면 적용 안 함
       const needsOffset = tableFirstQuestionNo === 1;
       const offset = needsOffset ? firstQuestionNo - 1 : 0;
 
-      console.log(`  📍 시작 문제 번호: ${firstQuestionNo}, 테이블 첫 번호: ${tableFirstQuestionNo}, 오프셋: ${offset}`);
+      console.log(
+        `  📍 시작 문제 번호: ${firstQuestionNo}, 테이블 첫 번호: ${tableFirstQuestionNo}, 오프셋: ${offset}`,
+      );
 
       answerTableDiv.each((index, row) => {
         if (index === 0) return;
@@ -593,9 +672,14 @@ export class CrawlerService {
           const actualQuestionNo = tableQuestionNo + offset;
 
           try {
-            answerMap.set(actualQuestionNo, this.parseCorrectAnswers(answerText));
+            answerMap.set(
+              actualQuestionNo,
+              this.parseCorrectAnswers(answerText),
+            );
           } catch {
-            console.warn(`  ⚠️  문제 ${actualQuestionNo} 정답 파싱 실패: ${answerText}`);
+            console.warn(
+              `  ⚠️  문제 ${actualQuestionNo} 정답 파싱 실패: ${answerText}`,
+            );
           }
         }
       });
@@ -621,7 +705,9 @@ export class CrawlerService {
             try {
               answerMap.set(questionNo, this.parseCorrectAnswers(answerText));
             } catch {
-              console.warn(`  ⚠️  문제 ${questionNo} 정답 파싱 실패: ${answerText}`);
+              console.warn(
+                `  ⚠️  문제 ${questionNo} 정답 파싱 실패: ${answerText}`,
+              );
             }
           }
         });
@@ -636,7 +722,8 @@ export class CrawlerService {
           console.log(`  📝 정답 문자열: ${answerString}`);
 
           // 크롤링된 문제들의 첫 번째 문제 번호 찾기
-          const firstQuestionNo = questions.length > 0 ? questions[0].questionNumber : 1;
+          const firstQuestionNo =
+            questions.length > 0 ? questions[0].questionNumber : 1;
           console.log(`  📍 시작 문제 번호: ${firstQuestionNo}`);
 
           for (let i = 0; i < answerString.length; i++) {
@@ -660,7 +747,9 @@ export class CrawlerService {
     // 디버깅: 정답 맵의 키 확인
     if (answerMap.size > 0) {
       const answerKeys = Array.from(answerMap.keys()).sort((a, b) => a - b);
-      console.log(`  📋 정답 문제 번호: ${answerKeys.slice(0, 5).join(', ')}${answerKeys.length > 5 ? ` ... ${answerKeys[answerKeys.length - 1]}` : ''}`);
+      console.log(
+        `  📋 정답 문제 번호: ${answerKeys.slice(0, 5).join(', ')}${answerKeys.length > 5 ? ` ... ${answerKeys[answerKeys.length - 1]}` : ''}`,
+      );
     }
 
     if (questions.length > 0 && answerMap.size === 0) {
@@ -668,7 +757,9 @@ export class CrawlerService {
     }
 
     if (!year) {
-      throw new Error('시험 연도를 추출할 수 없습니다. HTML 구조를 확인하세요.');
+      throw new Error(
+        '시험 연도를 추출할 수 없습니다. HTML 구조를 확인하세요.',
+      );
     }
     if (!subjectName || subjectName.trim() === '') {
       throw new Error('과목명을 추출할 수 없습니다. HTML 구조를 확인하세요.');
@@ -681,15 +772,18 @@ export class CrawlerService {
     await Promise.all(
       questions.map(async (questionData) => {
         // 문제 이미지 다중 처리
-        if (questionData.questionImageUrls && questionData.questionImageUrls.length > 0) {
+        if (
+          questionData.questionImageUrls &&
+          questionData.questionImageUrls.length > 0
+        ) {
           const newUrls = await Promise.all(
             questionData.questionImageUrls.map(async (url, idx) => {
               const newUrl = await this.storageService.processAndUploadImage(
                 url,
-                `exam_${year}_sub_${subjectName}_q_${questionData.questionNumber}_img${idx}`
+                `exam_${year}_sub_${subjectName}_q_${questionData.questionNumber}_img${idx}`,
               );
               return newUrl || url; // 실패하면 원본 유지
-            })
+            }),
           );
           questionData.questionImageUrls = newUrls;
         }
@@ -700,18 +794,19 @@ export class CrawlerService {
             if (choice.imageUrls && choice.imageUrls.length > 0) {
               const newUrls = await Promise.all(
                 choice.imageUrls.map(async (url, idx) => {
-                  const newUrl = await this.storageService.processAndUploadImage(
-                    url,
-                    `exam_${year}_sub_${subjectName}_q_${questionData.questionNumber}_c_${choice.number}_img${idx}`
-                  );
+                  const newUrl =
+                    await this.storageService.processAndUploadImage(
+                      url,
+                      `exam_${year}_sub_${subjectName}_q_${questionData.questionNumber}_c_${choice.number}_img${idx}`,
+                    );
                   return newUrl || url; // 실패하면 원본 유지
-                })
+                }),
               );
               choice.imageUrls = newUrls;
             }
-          })
+          }),
         );
-      })
+      }),
     );
 
     // ========================================
@@ -720,14 +815,15 @@ export class CrawlerService {
     console.log('💾 데이터베이스 저장 중...');
 
     return await this.dataSource.transaction(async (manager) => {
-      const subject = await this.subjectsService.findOrCreateByName(subjectName);
+      const subject =
+        await this.subjectsService.findOrCreateByName(subjectName);
 
       const existingExam = await manager.findOne(Exam, {
         where: {
           subject_id: subject.id,
           year: year,
-          exam_type: examType
-        }
+          exam_type: examType,
+        },
       });
 
       let savedExam: Exam;
@@ -735,7 +831,9 @@ export class CrawlerService {
       if (existingExam) {
         if (forceRetry) {
           console.log('  ⚠️  기존 시험 업데이트 중...');
-          console.log(`     ID: ${existingExam.id}, 제목: ${existingExam.title}`);
+          console.log(
+            `     ID: ${existingExam.id}, 제목: ${existingExam.title}`,
+          );
 
           await manager.delete(Questsion, { exam_id: existingExam.id });
 
@@ -747,7 +845,7 @@ export class CrawlerService {
         } else {
           throw new Error(
             `이미 동일한 시험이 존재합니다. --retry 옵션을 사용하세요.\n` +
-            `기존 시험 ID: ${existingExam.id}, 제목: ${existingExam.title}, 년도: ${existingExam.year}, 타입: ${existingExam.exam_type}`
+              `기존 시험 ID: ${existingExam.id}, 제목: ${existingExam.title}, 년도: ${existingExam.year}, 타입: ${existingExam.exam_type}`,
           );
         }
       } else {
@@ -756,7 +854,7 @@ export class CrawlerService {
           year,
           exam_type: examType,
           title,
-          total_questions: questions.length
+          total_questions: questions.length,
         });
         savedExam = await manager.save(exam);
         console.log(`  ✅ 시험 저장 완료 (ID: ${savedExam.id})`);
@@ -770,7 +868,9 @@ export class CrawlerService {
         const correctAnswers = answerMap.get(questionData.questionNumber);
 
         if (!correctAnswers || correctAnswers.length === 0) {
-          console.warn(`  ⚠️  문제 ${questionData.questionNumber} 정답 없음, 건너뜀`);
+          console.warn(
+            `  ⚠️  문제 ${questionData.questionNumber} 정답 없음, 건너뜀`,
+          );
           skippedQuestions.push(questionData.questionNumber);
           continue;
         }
@@ -783,14 +883,16 @@ export class CrawlerService {
           shared_example: questionData.sharedExample,
           question_image_urls: questionData.questionImageUrls,
           correct_answers: correctAnswers,
-          choices: questionData.choices
+          choices: questionData.choices,
         });
         await manager.save(question);
         savedQuestionCount++;
       }
 
       if (skippedQuestions.length > 0) {
-        console.warn(`  ⚠️  ${skippedQuestions.length}개 문제 건너뜀: ${skippedQuestions.join(', ')}`);
+        console.warn(
+          `  ⚠️  ${skippedQuestions.length}개 문제 건너뜀: ${skippedQuestions.join(', ')}`,
+        );
       }
       console.log(`  ✅ ${savedQuestionCount}개 문제 및 선택지 저장 완료`);
 
@@ -799,26 +901,35 @@ export class CrawlerService {
         title: savedExam.title,
         questionCount: savedQuestionCount,
         totalQuestions: questions.length,
-        skippedQuestions: skippedQuestions.length > 0 ? skippedQuestions : undefined
+        skippedQuestions:
+          skippedQuestions.length > 0 ? skippedQuestions : undefined,
       };
     });
   }
 
   // 전체 자동 크롤링
-  async crawlAll(mainUrl: string, options: {
-    forceRetry?: boolean;
-    subjectFilter?: string[]; // 특정 과목만 크롤링
-    delay?: number; // 요청 간 딜레이 (ms)
-    startIndex?: number; // 시작 과목 인덱스 (0부터 시작)
-  } = {}) {
-    const { forceRetry = false, subjectFilter = [], delay = 1000, startIndex = 0 } = options;
+  async crawlAll(
+    mainUrl: string,
+    options: {
+      forceRetry?: boolean;
+      subjectFilter?: string[]; // 특정 과목만 크롤링
+      delay?: number; // 요청 간 딜레이 (ms)
+      startIndex?: number; // 시작 과목 인덱스 (0부터 시작)
+    } = {},
+  ) {
+    const {
+      forceRetry = false,
+      subjectFilter = [],
+      delay = 1000,
+      startIndex = 0,
+    } = options;
 
     // 1단계: 과목 목록 수집
     let subjects = await this.getSubjectLinks(mainUrl);
 
     // 필터 적용 (특정 과목만 크롤링하고 싶을 때)
     if (subjectFilter.length > 0) {
-      subjects = subjects.filter(s => subjectFilter.includes(s.name));
+      subjects = subjects.filter((s) => subjectFilter.includes(s.name));
       console.log(`🔍 필터 적용: ${subjects.length}개 과목 선택됨`);
     }
 
@@ -828,9 +939,14 @@ export class CrawlerService {
     const failedUrls: string[] = [];
 
     // 시작 인덱스 적용
-    const actualStartIndex = Math.max(0, Math.min(startIndex, subjects.length - 1));
+    const actualStartIndex = Math.max(
+      0,
+      Math.min(startIndex, subjects.length - 1),
+    );
     if (actualStartIndex > 0) {
-      console.log(`📍 ${actualStartIndex}번째 과목부터 시작 (${actualStartIndex}개 건너뜀)`);
+      console.log(
+        `📍 ${actualStartIndex}번째 과목부터 시작 (${actualStartIndex}개 건너뜀)`,
+      );
     }
 
     // 2단계: 각 과목별로 처리
@@ -846,7 +962,9 @@ export class CrawlerService {
         // 3단계: 각 시험지 크롤링
         for (let j = 0; j < examLinks.length; j++) {
           try {
-            console.log(`  [${j + 1}/${examLinks.length}] 크롤링: ${examLinks[j]}`);
+            console.log(
+              `  [${j + 1}/${examLinks.length}] 크롤링: ${examLinks[j]}`,
+            );
             const result = await this.crawlExam(examLinks[j], forceRetry);
             successCount++;
 
@@ -858,7 +976,7 @@ export class CrawlerService {
                 subjectName: subject.name,
                 errorType: 'missing_answer',
                 errorMessage: `정답 없는 문제 ${result.skippedQuestions.length}개 건너뜀`,
-                skippedQuestions: result.skippedQuestions
+                skippedQuestions: result.skippedQuestions,
               });
 
               // 건너뛴 문제가 있는 URL도 재시도 목록에 추가
@@ -880,7 +998,7 @@ export class CrawlerService {
               subjectName: subject.name,
               errorType: 'exam',
               errorMessage: error.message,
-              stackTrace: error.stack
+              stackTrace: error.stack,
             });
 
             // 실패한 URL 저장
@@ -898,7 +1016,7 @@ export class CrawlerService {
           subjectName: subject.name,
           errorType: 'subject',
           errorMessage: error.message,
-          stackTrace: error.stack
+          stackTrace: error.stack,
         });
 
         // 실패한 URL 저장
@@ -915,7 +1033,7 @@ export class CrawlerService {
     // 실패 목록 출력
     if (errorLogs.length > 0) {
       console.log('\n⚠️  실패 목록:');
-      errorLogs.forEach(log => {
+      errorLogs.forEach((log) => {
         console.log(`   [${log.errorType}] ${log.subjectName || log.url}`);
         console.log(`      사유: ${log.errorMessage}`);
       });
@@ -930,7 +1048,9 @@ export class CrawlerService {
       }
       if (urlLogFile) {
         console.log(`   - 실패 URL 목록: ${urlLogFile}`);
-        console.log(`   💡 재시도: cat ${urlLogFile} | while read url; do yarn crawl "$url" --retry; done`);
+        console.log(
+          `   💡 재시도: cat ${urlLogFile} | while read url; do yarn crawl "$url" --retry; done`,
+        );
       }
     }
 
@@ -940,7 +1060,7 @@ export class CrawlerService {
       successCount,
       failCount,
       errorLogs,
-      failedUrls
+      failedUrls,
     };
   }
 }

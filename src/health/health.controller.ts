@@ -32,9 +32,10 @@ export class HealthController {
    * 운영 서버에서 실제 성능을 측정합니다.
    */
   @Get('performance')
-  @ApiOperation({ 
-    summary: '성능 측정', 
-    description: '실제 운영 환경에서 API 성능을 측정합니다. DB ping, 쿼리 실행 시간 등을 반환합니다.' 
+  @ApiOperation({
+    summary: '성능 측정',
+    description:
+      '실제 운영 환경에서 API 성능을 측정합니다. DB ping, 쿼리 실행 시간 등을 반환합니다.',
   })
   @ApiResponse({ status: 200, description: '성능 측정 완료' })
   async checkPerformance() {
@@ -49,7 +50,7 @@ export class HealthController {
       const dbPingStart = performance.now();
       await this.dataSource.query('SELECT 1');
       const dbPingTime = performance.now() - dbPingStart;
-      
+
       results.tests.push({
         name: 'db_ping',
         description: 'Simple SELECT 1 query',
@@ -72,7 +73,7 @@ export class HealthController {
       const findExamsStart = performance.now();
       await this.subjectsService.findExamsBySubject(1);
       const findExamsTime = performance.now() - findExamsStart;
-      
+
       results.tests.push({
         name: 'findExamsBySubject',
         description: 'Fetch 7 exams for subject 1',
@@ -84,7 +85,7 @@ export class HealthController {
       const findQuestionsStart = performance.now();
       await this.examsService.findQuestions(1, 'test', 1, 5);
       const findQuestionsTime = performance.now() - findQuestionsStart;
-      
+
       results.tests.push({
         name: 'findQuestions_paginated',
         description: 'Fetch 5 questions (page 1)',
@@ -96,7 +97,7 @@ export class HealthController {
       const findAllQuestionsStart = performance.now();
       await this.examsService.findQuestions(1, 'test');
       const findAllQuestionsTime = performance.now() - findAllQuestionsStart;
-      
+
       results.tests.push({
         name: 'findQuestions_full',
         description: 'Fetch all 35 questions',
@@ -108,7 +109,7 @@ export class HealthController {
       const findSubjectsStart = performance.now();
       await this.subjectsService.findAll(undefined, 1, 10);
       const findSubjectsTime = performance.now() - findSubjectsStart;
-      
+
       results.tests.push({
         name: 'findSubjects',
         description: 'Fetch 10 subjects',
@@ -118,19 +119,20 @@ export class HealthController {
 
       // 요약 통계
       const times = results.tests
-        .filter(t => typeof t.time_ms === 'number')
-        .map(t => t.time_ms);
-      
+        .filter((t) => typeof t.time_ms === 'number')
+        .map((t) => t.time_ms);
+
       return {
         ...results,
         summary: {
           total_tests: times.length,
-          avg_time_ms: Number((times.reduce((a, b) => a + b, 0) / times.length).toFixed(2)),
+          avg_time_ms: Number(
+            (times.reduce((a, b) => a + b, 0) / times.length).toFixed(2),
+          ),
           min_time_ms: Number(Math.min(...times).toFixed(2)),
           max_time_ms: Number(Math.max(...times).toFixed(2)),
         },
       };
-
     } catch (error) {
       return {
         ...results,

@@ -15,7 +15,7 @@ process.env.TZ = 'Asia/Seoul';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
+
   // 전역 Validation Pipe 설정
   app.useGlobalPipes(
     new ValidationPipe({
@@ -24,7 +24,7 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-  
+
   // CORS 허용 origin (로컬 개발 포트 제한 없음)
   const allowedOrigins: (string | RegExp)[] = [
     'https://www.qknou.kr',
@@ -48,7 +48,10 @@ async function bootstrap() {
   app.enableCors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
-      callback(isOriginAllowed(origin) ? null : new Error('Not allowed by CORS'), isOriginAllowed(origin) ? origin : false);
+      callback(
+        isOriginAllowed(origin) ? null : new Error('Not allowed by CORS'),
+        isOriginAllowed(origin) ? origin : false,
+      );
     },
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
@@ -65,12 +68,16 @@ async function bootstrap() {
     .addTag('subjects', '과목 관련 API')
     .addTag('departments', '학과 관련 API')
     .build();
-  
+
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api-docs', app, document);
-  
+
   await app.listen(process.env.PORT ?? 3000);
-  console.log(`🚀 서버가 실행 중입니다: http://localhost:${process.env.PORT ?? 3000}`);
-  console.log(`📚 Swagger 문서: http://localhost:${process.env.PORT ?? 3000}/api-docs`);
+  console.log(
+    `🚀 서버가 실행 중입니다: http://localhost:${process.env.PORT ?? 3000}`,
+  );
+  console.log(
+    `📚 Swagger 문서: http://localhost:${process.env.PORT ?? 3000}/api-docs`,
+  );
 }
 bootstrap();

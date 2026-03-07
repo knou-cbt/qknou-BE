@@ -1,5 +1,13 @@
-import { Subject } from "src/subjects/entities/subject.entity";
-import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import { Subject } from 'src/subjects/entities/subject.entity';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 
 @Entity('terms')
 @Index('IDX_terms_subject_term', ['subject_id', 'term'], { unique: true })

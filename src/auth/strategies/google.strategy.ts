@@ -1,8 +1,8 @@
-import { Injectable } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { PassportStrategy } from "@nestjs/passport";
-import { Strategy, VerifyCallback } from "passport-google-oauth20";
-import { AuthService } from "../auth.service";
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PassportStrategy } from '@nestjs/passport';
+import { Strategy, VerifyCallback } from 'passport-google-oauth20';
+import { AuthService } from '../auth.service';
 
 /**
  *  Strategy가 하는 일
@@ -13,25 +13,23 @@ import { AuthService } from "../auth.service";
  * 5.그러면 Controller의 req.user에서 사용자 정보에 접근 가능
  */
 @Injectable()
-export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {  
+export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   constructor(
     private configService: ConfigService, // .env 파일 읽기
-    private authService: AuthService // 사용자 생성, 조회
-
-  ) { 
+    private authService: AuthService, // 사용자 생성, 조회
+  ) {
     //부모 클래스(Strategy) 초기화
     super({
-        //구글 OAuth 앱 설정
+      //구글 OAuth 앱 설정
       clientID: configService.get('GOOGLE_CLIENT_ID'),
       clientSecret: configService.get('GOOGLE_CLIENT_SECRET'),
       callbackURL: configService.get('GOOGLE_CALLBACK_URL'),
-      
-    //구글에게 요청할 정보 범위
-      scope: ['email', 'profile'],  // ✅ profile 추가!
-          
-      })
-    }
-  
+
+      //구글에게 요청할 정보 범위
+      scope: ['email', 'profile'], // ✅ profile 추가!
+    });
+  }
+
   /**
    * 구글 로그인 성공 후 자동으로 호출되는 메서드
    * 실행 흐름:
@@ -45,13 +43,12 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     _accessToken: string, //구글 API 호출용 토큰(안씀)
     _refreshToken: string, //장기 토큰
     profile: any, //구글에서 받은 사용자 정보
-    done: VerifyCallback //Passport에게 결과 전달하는 콜백
-  ): Promise<any>{
-
+    done: VerifyCallback, //Passport에게 결과 전달하는 콜백
+  ): Promise<any> {
     const { id, displayName, name, emails } = profile;
 
     // 이름 안전하게 추출 (name이 없을 수도 있음)
-    let userName = displayName;  // 기본값: displayName 사용
+    let userName = displayName; // 기본값: displayName 사용
     if (name?.givenName && name?.familyName) {
       userName = `${name.givenName} ${name.familyName}`;
     } else if (name?.givenName) {
@@ -62,8 +59,8 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     const oauthUser = {
       provider: 'google',
       providerId: id,
-      email: emails?.[0]?.value || null,  // emails가 없을 수도 있음
-      name: userName || 'Google User',  // 이름이 없으면 기본값
+      email: emails?.[0]?.value || null, // emails가 없을 수도 있음
+      name: userName || 'Google User', // 이름이 없으면 기본값
       profileImage: null,
     };
 

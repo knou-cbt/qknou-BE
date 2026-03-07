@@ -9,10 +9,12 @@ import { TutorModule } from 'src/tutor/tutor.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Exam, Questsion]), SubjectsModule, TutorModule
+    TypeOrmModule.forFeature([Exam, Questsion]),
+    SubjectsModule,
+    TutorModule,
   ],
   controllers: [ExamsController],
   providers: [ExamsService],
-  exports: [ExamsService]
+  exports: [ExamsService],
 })
-export class ExamsModule { }
+export class ExamsModule {}

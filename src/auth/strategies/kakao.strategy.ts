@@ -1,14 +1,14 @@
-import { Injectable } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { PassportStrategy } from "@nestjs/passport";
-import { Strategy } from "passport-kakao";
-import { AuthService } from "../auth.service";
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PassportStrategy } from '@nestjs/passport';
+import { Strategy } from 'passport-kakao';
+import { AuthService } from '../auth.service';
 
 @Injectable()
-export class KakaoStrategy extends PassportStrategy(Strategy, 'kakao') { 
+export class KakaoStrategy extends PassportStrategy(Strategy, 'kakao') {
   constructor(
     private configService: ConfigService,
-    private authService: AuthService
+    private authService: AuthService,
   ) {
     super({
       //카카오 OAuth앱 설정
@@ -24,27 +24,29 @@ export class KakaoStrategy extends PassportStrategy(Strategy, 'kakao') {
     _accessToken: string,
     _refreshToken: string,
     profile: any,
-    done: any
-  ): Promise<any> { 
+    done: any,
+  ): Promise<any> {
     const { id, username, _json } = profile;
-    
+
     // 닉네임 추출 (여러 경로 시도)
-    const nickname = _json?.kakao_account?.profile?.nickname 
-                  || _json?.properties?.nickname 
-                  || username 
-                  || '사용자';
-    
+    const nickname =
+      _json?.kakao_account?.profile?.nickname ||
+      _json?.properties?.nickname ||
+      username ||
+      '사용자';
+
     const oauthUser = {
       provider: 'kakao',
       providerId: id.toString(),
       email: _json?.kakao_account?.email || null,
       name: nickname,
-      profileImage: _json?.kakao_account?.profile?.profile_image_url 
-                 || _json?.properties?.profile_image 
-                 || null,
-    }
-    
+      profileImage:
+        _json?.kakao_account?.profile?.profile_image_url ||
+        _json?.properties?.profile_image ||
+        null,
+    };
+
     const user = await this.authService.validateOAuthUser(oauthUser);
     done(null, user);
-    }
+  }
 }

@@ -7,11 +7,11 @@ import { UsersService } from 'src/users/users.service';
 export class AuthService {
   constructor(
     private usersService: UsersService, //사용자 DB 작업
-    private jwtService: JwtService //JWT 토큰 생성
-  ) { }
+    private jwtService: JwtService, //JWT 토큰 생성
+  ) {}
   /**
    * OAuth로 받은 사용자 정보를 검증하고 DB에 저장/업데이트
-   * 
+   *
    * 이 메서드가 하는 일:
    * 1. DB에 이 사용자가 이미 있는지 확인
    * 2. 없으면 새로 생성(회원가입)
@@ -20,26 +20,29 @@ export class AuthService {
   async validateOAuthUser(oauthUser: {
     provider: string; //google or kakako
     providerId: string; //OAuth에서 받은 사용자 ID
-    email: string; 
+    email: string;
     name: string;
-  }): Promise<User>{
-    //1. 이미 가입된 사용자인지 확인 
-    let user = await this.usersService.findByProviderId(oauthUser.provider, oauthUser.providerId)
+  }): Promise<User> {
+    //1. 이미 가입된 사용자인지 확인
+    let user = await this.usersService.findByProviderId(
+      oauthUser.provider,
+      oauthUser.providerId,
+    );
     if (!user) {
       //2-1. 처음 로그인하는 사용자 -> 회원가입
-      console.log(`[Auth] 새 사용자 생성: ${oauthUser.email}`)
+      console.log(`[Auth] 새 사용자 생성: ${oauthUser.email}`);
       user = await this.usersService.create({
         provider: oauthUser.provider,
         providerId: oauthUser.providerId,
         email: oauthUser.email,
         name: oauthUser.name,
-      })
+      });
     } else {
       //2-2 기존 사용자 -> 정보 업데이트(프로필 이미지, 이름 변경 반영)
       console.log(`[Auth] 기존 사용자 로그인: ${user.email}`);
       user = await this.usersService.update(user.id, {
         name: oauthUser.name,
-      })
+      });
     }
     return user;
   }
@@ -58,7 +61,7 @@ export class AuthService {
     };
     //JWT 토큰 생성(환경변수의 JWT_SECRET으로 서명됨)
     const accessToken = this.jwtService.sign(payload);
-    
+
     return {
       access_token: accessToken,
       //프론트엔드에서 바로 사용할 수 있는 사용자 정보도 함께 반환
@@ -66,8 +69,8 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
-        profileImage: user.profileImage
-      }
+        profileImage: user.profileImage,
+      },
     };
   }
 
@@ -75,8 +78,7 @@ export class AuthService {
    * JWT 토큰에서 사용자 정보 추출
    * 프론트엔드가 보낸 토큰이 유효한지 확인하고 사용자 정보를 가져온다
    */
-  async validateUser(userId: string): Promise<User | null> { 
+  async validateUser(userId: string): Promise<User | null> {
     return this.usersService.findById(userId);
   }
-
 }

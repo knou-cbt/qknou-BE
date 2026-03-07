@@ -17,7 +17,7 @@ export class SubjectsService implements OnModuleInit {
     @InjectRepository(Subject)
     private subjectRepository: Repository<Subject>,
     @InjectRepository(Exam)
-    private examRepository: Repository<Exam>
+    private examRepository: Repository<Exam>,
   ) {}
 
   /**
@@ -37,11 +37,13 @@ export class SubjectsService implements OnModuleInit {
     try {
       console.log('📊 [SubjectsService] 캐시 예열 시작...');
       const start = Date.now();
-      
+
       this.totalSubjectsCache = await this.subjectRepository.count();
-      
+
       const duration = Date.now() - start;
-      console.log(`✅ [SubjectsService] 전체 과목 수: ${this.totalSubjectsCache}개 캐시 완료 (${duration}ms)`);
+      console.log(
+        `✅ [SubjectsService] 전체 과목 수: ${this.totalSubjectsCache}개 캐시 완료 (${duration}ms)`,
+      );
     } catch (error) {
       console.error('❌ [SubjectsService] 캐시 예열 실패:', error.message);
       // 캐시 예열 실패해도 서버는 계속 실행 (첫 요청 시 캐싱됨)
@@ -50,24 +52,24 @@ export class SubjectsService implements OnModuleInit {
 
   /**
    * 과목 이름으로 조회하고, 없으면 새로 생성합니다.
-   * 
+   *
    * @param name - 조회할 과목 이름
    * @returns 기존 과목 또는 새로 생성된 과목
    */
   async findOrCreateByName(name: string): Promise<Subject> {
     // 이름으로 기존 과목 조회
     let subject = await this.subjectRepository.findOne({ where: { name } });
-    
+
     // 과목이 존재하지 않으면 새로 생성
     if (!subject) {
       subject = this.subjectRepository.create({ name });
       subject = await this.subjectRepository.save(subject);
       console.log(`새 과목 생성: ${name}`);
-      
+
       // 캐시 무효화 (새 과목이 추가되었으므로)
       this.totalSubjectsCache = null;
     }
-    
+
     return subject;
   }
 
@@ -96,7 +98,9 @@ export class SubjectsService implements OnModuleInit {
       const qb = this.subjectRepository
         .createQueryBuilder('subject')
         .select(['subject.id', 'subject.name'])
-        .where('LOWER(subject.name) LIKE LOWER(:search)', { search: `%${search}%` })
+        .where('LOWER(subject.name) LIKE LOWER(:search)', {
+          search: `%${search}%`,
+        })
         .orderBy('subject.name', 'ASC')
         .skip(skip)
         .take(limit);
@@ -116,7 +120,7 @@ export class SubjectsService implements OnModuleInit {
 
     //5. 응답 형식으로 변환
     return {
-      subjects: subjects.map(subject => ({
+      subjects: subjects.map((subject) => ({
         id: subject.id,
         name: subject.name,
       })),
@@ -124,9 +128,9 @@ export class SubjectsService implements OnModuleInit {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit)
-      }
-    }
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   /**
@@ -135,17 +139,17 @@ export class SubjectsService implements OnModuleInit {
   async findOne(id: number) {
     //1.DB에서 과목을 조회
     const subject = await this.subjectRepository.findOne({
-      where: {id},
-    })
+      where: { id },
+    });
     //2. 없으면 404 에러
     if (!subject) {
-      throw new NotFoundException(`과목 id ${id}를 찾을 수 없습니다.`)
+      throw new NotFoundException(`과목 id ${id}를 찾을 수 없습니다.`);
     }
     //3. 있으면 응답 형식으로 변환
     return {
       id: subject.id,
       name: subject.name,
-    }
+    };
   }
 
   /**
@@ -171,12 +175,11 @@ export class SubjectsService implements OnModuleInit {
       .addOrderBy('exam.exam_type', 'ASC')
       .getMany();
 
-    return exams.map(exam => ({
+    return exams.map((exam) => ({
       id: exam.id,
       title: exam.title,
       year: exam.year,
       examType: exam.exam_type,
-    }))
+    }));
   }
-
 }
