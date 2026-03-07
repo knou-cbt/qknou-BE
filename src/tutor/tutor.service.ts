@@ -285,6 +285,7 @@ term_candidates 규칙:
     // 5. 관련 문제 추천 (recommend)
     // ──────────────────────────────────────────────
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async recommendQuestions(
         termCandidates: string[],
         subjectId: number,
