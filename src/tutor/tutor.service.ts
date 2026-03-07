@@ -285,13 +285,14 @@ term_candidates 규칙:
     // 5. 관련 문제 추천 (recommend)
     // ──────────────────────────────────────────────
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    /* eslint-disable @typescript-eslint/no-unused-vars */
     async recommendQuestions(
         termCandidates: string[],
         subjectId: number,
         excludeQuestionId?: number,
         limit: number = 5,
     ): Promise<Array<{ id: number; questionNumber: number; text: string; examTitle: string; year: number }>> {
+    /* eslint-enable @typescript-eslint/no-unused-vars */
         if (termCandidates.length === 0) return [];
 
         let query = this.questionRepository
