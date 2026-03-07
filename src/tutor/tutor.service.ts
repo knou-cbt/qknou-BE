@@ -285,22 +285,23 @@ term_candidates 규칙:
     // 5. 관련 문제 추천 (recommend)
     // ──────────────────────────────────────────────
 
-    /* eslint-disable @typescript-eslint/no-unused-vars */
     async recommendQuestions(
         termCandidates: string[],
         subjectId: number,
         excludeQuestionId?: number,
         limit: number = 5,
     ): Promise<Array<{ id: number; questionNumber: number; text: string; examTitle: string; year: number }>> {
-    /* eslint-enable @typescript-eslint/no-unused-vars */
         if (termCandidates.length === 0) return [];
+
+        // TypeORM 쿼리에서 사용할 파라미터 객체
+        const params = { subjectId };
 
         let query = this.questionRepository
             .createQueryBuilder('q')
             .innerJoin('q.exam', 'exam')
             .innerJoin('exam.subject', 'subject')
             .select(['q.id', 'q.question_number', 'q.question_text', 'exam.title', 'exam.year'])
-            .where('exam.subject_id = :subjectId', { subjectId: subjectId });
+            .where('exam.subject_id = :subjectId', params);
 
         // concept_tags JSONB에 term 후보 중 하나라도 포함되어 있는 문제 조회
         const tagConditions = termCandidates.map((_, i) => `q.concept_tags @> :tag${i}::jsonb`);
