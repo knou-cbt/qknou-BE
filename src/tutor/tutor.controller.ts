@@ -6,13 +6,25 @@ import {
   Param,
   ParseIntPipe,
   NotFoundException,
+  UseGuards,
+  Req,
+  Query,
+  Delete,
 } from '@nestjs/common';
 import { TutorService } from './tutor.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
 import { Repository } from 'typeorm';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { TutorChatDto } from './dto/chat.dto';
+import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { ChatLimitGuard } from './guards/chat-limit.guard';
 
 @ApiTags('tutor')
 @Controller('api/tutor')
@@ -79,13 +91,33 @@ export class TutorController {
   }
 
   @Post('chat')
+  @UseGuards(JwtAuthGuard, ChatLimitGuard)
+  @ApiBearerAuth('access-token')
   @ApiOperation({
-    summary: 'AI 튜터 챗봇',
+    summary: 'AI 튜터 챗봇 (로그인 필수, 일 5회 제한)',
     description:
-      '현재 문제 기반으로 개념 질문, 해설 질문, 비교, 관련 문제 추천 등을 처리합니다.',
+      '현재 문제 기반으로 개념 질문, 해설 질문, 비교, 관련 문제 추천 등을 처리합니다. 로그인한 사용자만 사용 가능하며 하루 5회로 제한됩니다.',
   })
-  @ApiResponse({ status: 200, description: '챗봇 응답 성공' })
-  async chat(@Body() dto: TutorChatDto) {
+  @ApiResponse({
+    status: 200,
+    description: '챗봇 응답 성공',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          answer: 'DI(Dependency Injection)는...',
+          intent: 'define',
+        },
+        remainingCount: 4,
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: '인증 실패 (로그인 필요)' })
+  @ApiResponse({
+    status: 403,
+    description: '일일 사용 횟수 초과 (5회 제한)',
+  })
+  async chat(@Body() dto: TutorChatDto, @Req() req: any) {
     const result = await this.tutorService.chat(
       dto.questionId,
       dto.message,
@@ -95,6 +127,70 @@ export class TutorController {
     return {
       success: true,
       data: result,
+      remainingCount: req.remainingCount,
+    };
+  }
+
+  @Get('remaining-count')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: '남은 챗봇 사용 횟수 조회',
+    description: '오늘 남은 AI 튜터 챗봇 사용 횟수를 반환합니다.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '조회 성공',
+    schema: {
+      example: {
+        success: true,
+        remainingCount: 3,
+        totalLimit: 5,
+      },
+    },
+  })
+  async getRemainingCount(@Req() req: any) {
+    const userId = req.user.id;
+    const remaining = await this.tutorService.getRemainingCount(userId);
+
+    return {
+      success: true,
+      remainingCount: remaining,
+      totalLimit: 5,
+    };
+  }
+
+  @Delete('cleanup')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: '오래된 챗봇 사용 데이터 삭제 (관리자용)',
+    description:
+      '지정된 일수 이전의 챗봇 사용 데이터를 삭제합니다. 기본값: 90일',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '삭제 완료',
+    schema: {
+      example: {
+        success: true,
+        deleted: 1523,
+        cutoffDate: '2025-12-08',
+        message: '1523개의 오래된 데이터가 삭제되었습니다.',
+      },
+    },
+  })
+  async cleanupOldData(@Query('days') days?: number) {
+    const daysToDelete = days ? parseInt(days.toString()) : 90;
+
+    const result =
+      await this.tutorService.manualCleanupOldChatLimits(daysToDelete);
+
+    return {
+      success: true,
+      deleted: result.deleted,
+      cutoffDate: result.cutoffDate,
+      message: `${result.deleted}개의 오래된 데이터가 삭제되었습니다.`,
     };
   }
 }

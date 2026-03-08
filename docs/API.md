@@ -10,8 +10,9 @@
 | 10~11 | 시험 | 문제 조회, 제출(채점) |
 | 12~13 | 학과 | 목록 조회, 학과별 과목 목록 |
 | 14~15 | Tutor | 문제 해설 조회/생성, 해설 재생성 |
-| 16 | Tutor | AI 튜터 챗봇 |
-| 17~19 | Health | 서버 상태, 성능 측정, DB 연결 |
+| 16 | Tutor | AI 튜터 챗봇 (로그인 필수, 일 5회 제한) |
+| 17 | Tutor | 남은 챗봇 사용 횟수 조회 |
+| 18~20 | Health | 서버 상태, 성능 측정, DB 연결 |
 
 ---
 
@@ -664,7 +665,14 @@ function ExampleText({ text }: { text: string }) {
 | --- | --- |
 | **Method** | POST |
 | **URL** | /api/tutor/chat |
-| **설명** | 현재 문제 기반으로 개념 질문, 개념 비교, 관련 문제 추천 등을 처리하는 AI 튜터 챗봇입니다. |
+| **설명** | 현재 문제 기반으로 개념 질문, 개념 비교, 관련 문제 추천 등을 처리하는 AI 튜터 챗봇입니다. **로그인 필수, 일일 5회 제한** |
+| **인증** | JWT Bearer Token 필수 |
+
+**Request - Header**
+
+| key | 설명 | value 타입 | 옵션 | Nullable |
+| --- | --- | --- | --- | --- |
+| Authorization | Bearer {access_token} | string | - | N |
 
 **Request - Body (JSON)**
 
@@ -698,6 +706,7 @@ function ExampleText({ text }: { text: string }) {
 | data.recommendations[].text | 문제 텍스트 (80자 요약) | string | - | N |
 | data.recommendations[].examTitle | 시험 제목 | string | - | N |
 | data.recommendations[].year | 시험 연도 | number | - | N |
+| remainingCount | 오늘 남은 사용 횟수 (0~5) | number | - | N |
 
 **Example - 개념 질문 (define)**
 
@@ -714,7 +723,8 @@ function ExampleText({ text }: { text: string }) {
   "data": {
     "answer": "가계는 개인이나 가구가 소비와 저축을 통해 경제활동을 하는 단위입니다...",
     "intent": "define"
-  }
+  },
+  "remainingCount": 4
 }
 ```
 
@@ -779,11 +789,57 @@ function ExampleText({ text }: { text: string }) {
 | status | response content |
 | --- | --- |
 | 200 | 챗봇 응답 성공 |
+| 401 | 인증 실패 (로그인 필요) |
+| 403 | 일일 사용 횟수 초과 (5회 제한) |
 | 404 | 문제를 찾을 수 없습니다 |
 
 ---
 
-## 17. Health - 서버 상태 확인
+## 17. Tutor - 남은 챗봇 사용 횟수 조회
+
+### **기본 정보**
+
+| 항목 | 내용 |
+| --- | --- |
+| **Method** | GET |
+| **URL** | /api/tutor/remaining-count |
+| **설명** | 오늘 남은 AI 튜터 챗봇 사용 횟수를 반환합니다. (로그인 필수) |
+| **인증** | JWT Bearer Token 필수 |
+
+**Request - Header**
+
+| key | 설명 | value 타입 | 옵션 | Nullable |
+| --- | --- | --- | --- | --- |
+| Authorization | Bearer {access_token} | string | - | N |
+
+**Response**
+
+| key | 설명 | value 타입 | 옵션 | Nullable |
+| --- | --- | --- | --- | --- |
+| success | 성공 여부 | boolean | - | N |
+| remainingCount | 오늘 남은 사용 횟수 (0~5) | number | - | N |
+| totalLimit | 일일 총 제한 횟수 | number | - | N |
+
+**Example**
+
+```json
+{
+  "success": true,
+  "remainingCount": 3,
+  "totalLimit": 5
+}
+```
+
+**Status**
+
+| status | response content |
+| --- | --- |
+| 200 | 조회 성공 |
+| 401 | 인증 실패 (로그인 필요) |
+
+---
+
+## 18. Health - 서버 상태 확인
 
 ### **기본 정보**
 
@@ -809,7 +865,7 @@ function ExampleText({ text }: { text: string }) {
 
 ---
 
-## 18. Health - 성능 측정
+## 19. Health - 성능 측정
 
 ### **기본 정보**
 
@@ -838,7 +894,7 @@ function ExampleText({ text }: { text: string }) {
 
 ---
 
-## 19. Health - DB 연결 상태
+## 20. Health - DB 연결 상태
 
 ### **기본 정보**
 

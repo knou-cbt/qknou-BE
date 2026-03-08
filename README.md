@@ -90,6 +90,29 @@ yarn install
 bash ./deploy.sh
 ```
 
+## TODO
+
+### 🔄 In Progress
+
+- [ ] **챗봇 사용 횟수 제한 (DB 기반)** ✅ 구현 완료
+  - [x] `user_chat_limits` 테이블 생성 (엔티티)
+  - [x] `ChatLimitGuard` 구현 (일일 5회 제한)
+  - [x] `POST /api/tutor/chat`에 인증 + 횟수 제한 적용
+  - [x] `GET /api/tutor/remaining-count` API 추가
+  - [x] **Cron Job으로 90일 이전 데이터 자동 삭제** ✅
+  - [x] **수동 삭제 API 추가** (`DELETE /api/tutor/cleanup`) ✅
+  - [x] 문서 업데이트 (API.md, AI_TUTOR.md)
+  - [ ] 서버 재시작 및 테스트
+  - [ ] 프론트엔드 연동 (remainingCount 표시)
+
+### 📋 Backlog
+
+- [ ] **Redis 마이그레이션** (사용자 규모 증가 시)
+  - [ ] Redis 인프라 구축
+  - [ ] ChatLimitGuard Redis 버전 구현
+  - [ ] DB → Redis 마이그레이션
+  - [ ] 성능 비교 및 모니터링
+
 ## Resources
 
 Check out a few resources that may come in handy when working with NestJS:
