@@ -199,30 +199,13 @@ function detectLanguage(code: string): string {
 export function formatCodeBlocks(text: string): string {
   if (!text) return text;
 
-  console.log('[Code Formatter] 입력 텍스트:', text.substring(0, 200));
-  console.log('[Code Formatter] 백틱 포함 여부:', text.includes('```'));
-
   // 코드 블록 패턴: ```...``` 또는 ```언어\n...\n```
   // 더 유연한 패턴: 백틱 3개 이상, 선택적 언어, 내용, 백틱 3개 이상
   const pattern = /```+(\w*)\n?([\s\S]*?)```+/g;
   
-  let matchCount = 0;
   const result = text.replace(pattern, (match, lang, code) => {
-    matchCount++;
-    console.log(`[Code Formatter] 매칭 #${matchCount}:`, {
-      lang,
-      codeLength: code.length,
-      codePreview: code.substring(0, 100),
-    });
-
     const trimmedCode = code.trim();
     if (!trimmedCode) return match;
-
-    console.log('[Code Formatter] 코드 블록 발견:', {
-      lang,
-      codePreview: trimmedCode.substring(0, 50) + '...',
-      lineCount: trimmedCode.split('\n').length,
-    });
 
     // 이미 제대로 들여쓰기가 되어 있는지 확인
     // 조건: 중괄호 다음 줄이 들여쓰기되어 있는지 확인
@@ -239,13 +222,11 @@ export function formatCodeBlocks(text: string): string {
     }
     
     if (hasProperIndent) {
-      console.log('[Code Formatter] 이미 포맷팅되어 있음 - 건너뜀');
       return match; // 이미 포맷팅되어 있음
     }
 
     // 언어 감지
     const language = lang || detectLanguage(trimmedCode);
-    console.log('[Code Formatter] 감지된 언어:', language);
 
     // 언어별 포맷팅
     let formatted = trimmedCode;
@@ -254,25 +235,20 @@ export function formatCodeBlocks(text: string): string {
       case 'c++':
       case 'c':
         formatted = formatCppCode(trimmedCode);
-        console.log('[Code Formatter] C++ 포맷팅 완료');
         break;
       case 'java':
         formatted = formatJavaCode(trimmedCode);
-        console.log('[Code Formatter] Java 포맷팅 완료');
         break;
       case 'python':
       case 'py':
         formatted = formatPythonCode(trimmedCode);
-        console.log('[Code Formatter] Python 포맷팅 완료');
         break;
       default:
-        console.log('[Code Formatter] 알 수 없는 언어 - 포맷팅 안 함');
         return match;
     }
 
     return `\`\`\`${lang}\n${formatted}\n\`\`\``;
   });
 
-  console.log(`[Code Formatter] 총 ${matchCount}개 코드 블록 처리됨`);
   return result;
 }
