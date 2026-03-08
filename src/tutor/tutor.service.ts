@@ -5,12 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron } from '@nestjs/schedule';
 import OpenAI from 'openai';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
-import { Repository } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
 import { Term } from './entities/term.entity';
 import { Exam } from 'src/exams/entities/exam.entity';
+import { UserChatLimit } from './entities/chat-limit.entity';
 
 const PROMPT_VERSION = 'v1';
 
@@ -37,6 +39,8 @@ export class TutorService {
     private termRepository: Repository<Term>,
     @InjectRepository(Exam)
     private examRepository: Repository<Exam>,
+    @InjectRepository(UserChatLimit)
+    private chatLimitRepository: Repository<UserChatLimit>,
   ) {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
     this.openai = new OpenAI({ apiKey });
@@ -519,5 +523,89 @@ term_candidates 규칙:
     }
 
     return { answer, intent, recommendations };
+  }
+
+  // ──────────────────────────────────────────────
+  // 7. 남은 횟수 조회
+  // ──────────────────────────────────────────────
+
+  async getRemainingCount(userId: string): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    const limit = await this.chatLimitRepository.findOne({
+      where: { user_id: userId, date: today as any },
+    });
+
+    if (!limit) return 5;
+    return Math.max(0, 5 - limit.count);
+  }
+
+  // ──────────────────────────────────────────────
+  // 8. Cron Job - 오래된 챗봇 사용 데이터 삭제
+  // ──────────────────────────────────────────────
+
+  /**
+   * 매일 새벽 3시에 90일 이전 데이터 삭제
+   */
+  @Cron('0 3 * * *', {
+    name: 'cleanup-old-chat-limits',
+    timeZone: 'Asia/Seoul',
+  })
+  async cleanupOldChatLimits() {
+    this.logger.log('=== 오래된 챗봇 사용 데이터 정리 시작 ===');
+
+    try {
+      // 90일 이전 날짜 계산
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      const cutoffDate = ninetyDaysAgo.toISOString().split('T')[0];
+
+      // 삭제 전 개수 확인
+      const countBefore = await this.chatLimitRepository.count({
+        where: {
+          date: LessThan(cutoffDate as any),
+        },
+      });
+
+      if (countBefore === 0) {
+        this.logger.log('삭제할 오래된 데이터가 없습니다.');
+        return;
+      }
+
+      // 삭제 실행
+      const result = await this.chatLimitRepository.delete({
+        date: LessThan(cutoffDate as any),
+      });
+
+      this.logger.log(
+        `오래된 챗봇 사용 데이터 ${result.affected}개 삭제 완료 (${cutoffDate} 이전)`,
+      );
+    } catch (error) {
+      this.logger.error('오래된 데이터 삭제 중 오류 발생:', error);
+    }
+  }
+
+  /**
+   * 수동 실행용 메서드 (테스트/관리자용)
+   */
+  async manualCleanupOldChatLimits(days: number = 90): Promise<{
+    deleted: number;
+    cutoffDate: string;
+  }> {
+    const daysAgo = new Date();
+    daysAgo.setDate(daysAgo.getDate() - days);
+    const cutoffDate = daysAgo.toISOString().split('T')[0];
+
+    const result = await this.chatLimitRepository.delete({
+      date: LessThan(cutoffDate as any),
+    });
+
+    this.logger.log(
+      `수동 삭제: ${result.affected}개 삭제 (${cutoffDate} 이전, ${days}일)`,
+    );
+
+    return {
+      deleted: result.affected || 0,
+      cutoffDate,
+    };
   }
 }

@@ -67,6 +67,19 @@ async function bootstrap() {
     .addTag('exams', '시험 관련 API')
     .addTag('subjects', '과목 관련 API')
     .addTag('departments', '학과 관련 API')
+    .addTag('auth', '인증 관련 API')
+    .addTag('tutor', 'AI 튜터 관련 API')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'JWT',
+        description: 'JWT 토큰을 입력하세요 (Bearer 제외)',
+        in: 'header',
+      },
+      'access-token',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

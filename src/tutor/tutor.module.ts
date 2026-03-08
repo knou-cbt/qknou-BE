@@ -5,9 +5,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
 import { Term } from './entities/term.entity';
 import { Exam } from 'src/exams/entities/exam.entity';
+import { UserChatLimit } from './entities/chat-limit.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Questsion, Term, Exam])],
+  imports: [TypeOrmModule.forFeature([Questsion, Term, Exam, UserChatLimit])],
   controllers: [TutorController],
   providers: [TutorService],
   exports: [TutorService],
