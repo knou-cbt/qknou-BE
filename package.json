@@ -48,6 +48,8 @@
     "@nestjs/schedule": "^6.1.1",
     "@nestjs/swagger": "^7.0.0",
     "@nestjs/typeorm": "^11.0.0",
+    "@sentry/nestjs": "^10.53.1",
+    "@sentry/profiling-node": "^10.53.1",
     "@supabase/supabase-js": "^2.90.1",
     "axios": "^1.13.2",
     "cheerio": "^1.1.2",
