@@ -677,15 +677,49 @@ def attach_image_mappings(
             def _needs_images(q: dict) -> bool:
                 body = (q.get("questionText") or "").count("[그림]")
                 ex = (q.get("exampleText") or "").count("[그림]")
+                shared = (q.get("sharedExample") or "").count("[그림]") if not q.get("sharedExampleImageUrls") else 0
                 ch = sum(1 for c in q.get("choices", []) if c.get("text") == "[그림]" and not c.get("imageUrls"))
-                return body + ex + ch > 0
+                return body + ex + shared + ch > 0
 
             targets = sorted([q for q in qs if _needs_images(q)], key=lambda x: x["questionNumber"])
             n = len(targets)
 
-            # 왼쪽 컬럼 질문 수: 왼쪽 이미지 비율에 비례 (최소 1, 왼쪽 이미지가 있을 때)
+            # 왼쪽 컬럼 이미지 배정 수 계산
+            # 공통보기(※) 그룹은 여러 문항이 같은 이미지를 공유(dedup)하므로
+            # 그룹 단위로 왼쪽 이미지를 배정한 후, 그룹에 속한 모든 문항을 left_targets에 포함
             if left_imgs and n > 0:
-                n_left = max(1, round(n * len(left_imgs) / max(len(page_imgs), 1)))
+                # 이미지가 필요한 유니크 공통보기 텍스트를 등장 순서대로 수집
+                seen_shared_ex: dict[str, int] = {}
+                for t in targets:
+                    s = t.get("sharedExample") or ""
+                    if "[그림]" in s and not t.get("sharedExampleImageUrls") and s not in seen_shared_ex:
+                        seen_shared_ex[s] = len(seen_shared_ex)
+
+                # 왼쪽 이미지로 커버할 공통보기 그룹 수
+                n_left_shared_groups = min(len(left_imgs), len(seen_shared_ex))
+                left_shared_texts = set(list(seen_shared_ex.keys())[:n_left_shared_groups])
+
+                # 해당 공통보기 그룹에 속한 모든 문항을 left_targets에 포함
+                n_left = sum(1 for t in targets if (t.get("sharedExample") or "") in left_shared_texts)
+
+                # 남은 왼쪽 이미지: dedup 반영한 유효 필요 수 == 전체 이미지 수일 때만 강제 배정
+                # (이미지 여유분이 없는 경우만 강제 배정 — 공통보기 이미지 오배정 방지)
+                remaining_left = len(left_imgs) - n_left_shared_groups
+                if remaining_left > 0:
+                    seen_sh: set[str] = set()
+                    effective_needed = 0
+                    for t in targets:
+                        s = t.get("sharedExample") or ""
+                        if "[그림]" in s and not t.get("sharedExampleImageUrls") and s not in seen_sh:
+                            effective_needed += 1
+                            seen_sh.add(s)
+                        effective_needed += (t.get("questionText") or "").count("[그림]")
+                        effective_needed += (t.get("exampleText") or "").count("[그림]")
+                        effective_needed += sum(1 for c in t.get("choices", []) if c.get("text") == "[그림]" and not c.get("imageUrls"))
+                    if effective_needed >= len(page_imgs):
+                        non_shared = [t for t in targets if (t.get("sharedExample") or "") not in left_shared_texts]
+                        n_left += min(remaining_left, len(non_shared))
+
                 n_left = min(n_left, n)
             else:
                 n_left = 0
@@ -693,9 +727,32 @@ def attach_image_mappings(
             left_targets = targets[:n_left]
             right_targets = targets[n_left:]
 
+            # 공통보기 이미지 중복 배정 방지: {sharedExample 텍스트: [image_paths]}
+            assigned_shared: dict[str, list] = {}
+
             def _assign_group(group_imgs: list, group_qs: list) -> None:
                 img_iter = iter(group_imgs)
                 for tq in group_qs:
+                    # ── sharedExample 이미지 (같은 ※ 텍스트는 URL 재사용) ──
+                    shared_text = tq.get("sharedExample") or ""
+                    if "[그림]" in shared_text and not tq.get("sharedExampleImageUrls"):
+                        if shared_text in assigned_shared:
+                            tq["sharedExampleImageUrls"] = assigned_shared[shared_text]
+                        else:
+                            im = next(img_iter, None)
+                            if im is not None:
+                                urls = [im["saved_path"]]
+                                tq["sharedExampleImageUrls"] = urls
+                                assigned_shared[shared_text] = urls
+                                mappings.append({
+                                    "page": page_idx,
+                                    "image": im["saved_path"],
+                                    "bbox_percent": im.get("bbox_percent"),
+                                    "questionNumber": tq["questionNumber"],
+                                    "mappedTo": "shared_example",
+                                })
+                                print(f"  [fallback] Q{tq['questionNumber']} ← {Path(im['saved_path']).name} (shared_example)")
+                    # ── 본문/보기 이미지 ──
                     n_body = (
                         (tq.get("questionText") or "").count("[그림]")
                         + (tq.get("exampleText") or "").count("[그림]")
@@ -713,6 +770,7 @@ def attach_image_mappings(
                             "mappedTo": "question",
                         })
                         print(f"  [fallback] Q{tq['questionNumber']} ← {Path(im['saved_path']).name} (body)")
+                    # ── 선택지 이미지 ──
                     for c in sorted(tq.get("choices", []), key=lambda c: c.get("number", 0)):
                         if c.get("text") != "[그림]" or c.get("imageUrls"):
                             continue
@@ -1752,6 +1810,18 @@ def parse_structured_questions(page_ocr_texts: list[str]):
     pending_shared_until: int = 9999  # ※ 범위의 마지막 문항 번호
 
     for page_idx, page_text in enumerate(page_ocr_texts, start=1):
+        # 페이지 첫 문항 이전 preamble에 ※ 공통 설명이 있으면 pending_shared로 설정
+        first_q = QUESTION_SPLIT_PATTERN.search(page_text)
+        if first_q:
+            preamble = page_text[:first_q.start()].strip()
+            if "※" in preamble:
+                note_start = preamble.find("※")
+                note_text = normalize_ws(preamble[note_start:])
+                if note_text:
+                    pending_shared = note_text
+                    m_range = re.search(r'[(\[]\s*\d+\s*[~\-]\s*(\d+)\s*[)\]]', note_text)
+                    pending_shared_until = int(m_range.group(1)) if m_range else 9999
+
         raw_blocks = split_question_blocks(page_text)
         for qn, block, shared_note in raw_blocks:
             choices, stem = parse_choices_from_block(block)
@@ -1787,6 +1857,7 @@ def parse_structured_questions(page_ocr_texts: list[str]):
                 "questionText": question_text,
                 "exampleText": example_text,
                 "sharedExample": pending_shared if qn <= pending_shared_until else None,
+                "sharedExampleImageUrls": None,
                 "questionImageUrls": None,
                 "choices": choices if choices else [],
                 "needsNonTextRecovery": False,
@@ -1795,12 +1866,19 @@ def parse_structured_questions(page_ocr_texts: list[str]):
             # ── 후처리: OCR이 [그림] 누락 시 보완 ──
             # "다음 그래프", "다음 표" 등 시각 자료 참조가 있는데 [그림]이 없으면 자동 삽입
             _VISUAL_REF = re.compile(
-                r"(?:다음|주어진|아래).{0,30}(?:그래프|그림|표(?!현|준|시|기|적|지|면|출|명)|트리|힙|행렬|도형|순서도)",
+                r"(?:"
+                r"(?:다음(?!\s*중)|주어진|아래).{0,30}(?:그래프|그림|표(?!현|준|시|기|적|지|면|출|명)|트리|힙|행렬|도형|순서도)"
+                r"|(?:그래프|그림|표|트리|힙|행렬|도형|순서도)로\s*나타낸"
+                r")",
                 re.IGNORECASE,
             )
             if "[그림]" not in question_text and _VISUAL_REF.search(question_text):
                 question_text = question_text + " [그림]"
                 record["questionText"] = question_text
+            shared_ex = record.get("sharedExample") or ""
+            if shared_ex and "[그림]" not in shared_ex and _VISUAL_REF.search(shared_ex):
+                shared_ex = shared_ex + " [그림]"
+                record["sharedExample"] = shared_ex
             # 선택지가 (a)(b)(c)(d) 같은 레이블이고 4개이지만 [그림]이 하나도 없으면 전체를 [그림]으로 교체
             _LABEL_PATTERN = re.compile(r"^\s*[\(\[（]?\s*[a-dA-D가나다라]\s*[\)\]）]?\s*$")
             choices_all_labels = (
@@ -1824,6 +1902,9 @@ def parse_structured_questions(page_ocr_texts: list[str]):
             elif "[그림]" in question_text:
                 record["needsNonTextRecovery"] = True
                 record["recoveryReason"] = "body_has_image"
+            elif "[그림]" in (record.get("sharedExample") or ""):
+                record["needsNonTextRecovery"] = True
+                record["recoveryReason"] = "shared_example_has_image"
 
             # 먼저 등장한 페이지 우선, 이미 있으면 choices만 보완
             if qn not in by_qn:
