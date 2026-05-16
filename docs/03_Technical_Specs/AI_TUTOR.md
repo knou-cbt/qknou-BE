@@ -1,6 +1,7 @@
 # AI 튜터 설계 및 구현 문서
 
 > 작성일: 2026-03-04  
+> 최종 수정: 2026-03-08  
 > 상태: 구현 완료
 
 ---
@@ -14,8 +15,9 @@
 | 3 | AI 튜터 (문제 화면 도우미) | 문제 기반 질의응답 챗봇 |
 | 4 | 개념(term) 기반 구조 | 개념 설명 캐시 및 terms 테이블 |
 | 5 | concept_tags (문제 개념 태그) | 문제별 핵심 개념 태그 |
-| 6 | 스키마 변경 사항 | 테이블/컬럼 추가 내역 |
-| 7 | 구현 파일 목록 | 변경/생성된 파일 정리 |
+| 6 | **챗봇 사용 횟수 제한** | **사용자별 일일 5회 제한** |
+| 7 | 스키마 변경 사항 | 테이블/컬럼 추가 내역 |
+| 8 | 구현 파일 목록 | 변경/생성된 파일 정리 |
 
 ---
 
@@ -181,7 +183,136 @@ LLM을 통해 사용자 질문의 의도와 핵심 개념을 추출한다.
 
 ---
 
-## 6. 스키마 변경 사항
+## 6. 챗봇 사용 횟수 제한
+
+### 구현 배경
+
+프론트엔드 기반 횟수 제한의 문제점:
+- localStorage/sessionStorage 사용 시 시크릿 모드에서 초기화
+- 브라우저 간 동기화 안 됨
+- 개발자 도구로 쉽게 우회 가능
+
+→ 백엔드에서 DB 기반으로 횟수 제한 구현
+
+### 제한 정책
+
+| 항목 | 내용 |
+| --- | --- |
+| 제한 횟수 | 일 5회 |
+| 제한 단위 | 로그인한 사용자별 (user_id 기준) |
+| 리셋 주기 | 매일 자정 (날짜 변경 시 자동 리셋) |
+| 비로그인 사용자 | 챗봇 사용 불가 (로그인 필수) |
+
+### user_chat_limits 테이블
+
+| column | 타입 | 설명 | 비고 |
+| --- | --- | --- | --- |
+| id | serial PK | | |
+| user_id | uuid, FK → users.id | 사용자 | |
+| date | date | 날짜 (YYYY-MM-DD) | |
+| count | int, default 0 | 당일 사용 횟수 | |
+| created_at | timestamptz | 생성일 | |
+
+유니크 인덱스: `IDX_user_chat_limits_user_date` (user_id, date)
+
+### 동작 흐름
+
+```
+요청 → JwtAuthGuard (로그인 검증) 
+  → ChatLimitGuard (횟수 제한 검증)
+  → TutorService.chat() 실행
+  → 응답 { data, remainingCount }
+```
+
+**ChatLimitGuard 로직:**
+```
+1. JWT에서 user_id 추출
+2. 오늘 날짜(YYYY-MM-DD) 기준으로 user_chat_limits 조회
+3. 레코드 없음 → 생성 (count: 1) → 통과
+4. count < 5 → increment → 통과
+5. count >= 5 → 403 Forbidden
+```
+
+### API 변경사항
+
+#### POST /api/tutor/chat
+
+**변경 전:**
+```json
+{
+  "success": true,
+  "data": {
+    "answer": "...",
+    "intent": "define"
+  }
+}
+```
+
+**변경 후:**
+```json
+{
+  "success": true,
+  "data": {
+    "answer": "...",
+    "intent": "define"
+  },
+  "remainingCount": 3
+}
+```
+
+#### GET /api/tutor/remaining-count (신규)
+
+남은 횟수 조회 API (프론트에서 미리 표시할 때 사용)
+
+**요청:**
+```
+GET /api/tutor/remaining-count
+Authorization: Bearer <JWT>
+```
+
+**응답:**
+```json
+{
+  "success": true,
+  "remainingCount": 3,
+  "totalLimit": 5
+}
+```
+
+### 에러 응답
+
+| Status | 설명 | 응답 예시 |
+| --- | --- | --- |
+| 401 | 로그인하지 않음 | `{ "message": "Unauthorized" }` |
+| 403 | 일일 횟수 초과 | `{ "message": "일일 사용 횟수를 초과했습니다. (5회 제한)" }` |
+
+### 통계 쿼리 예시
+
+```sql
+-- 일별 활성 사용자 수
+SELECT 
+  date,
+  COUNT(DISTINCT user_id) as active_users,
+  SUM(count) as total_requests
+FROM user_chat_limits
+GROUP BY date
+ORDER BY date DESC;
+
+-- 오늘 사용 현황
+SELECT 
+  COUNT(*) as users_today,
+  SUM(count) as total_requests_today
+FROM user_chat_limits
+WHERE date = CURRENT_DATE;
+
+-- 오래된 데이터 삭제 (90일 이전)
+DELETE FROM user_chat_limits
+WHERE date < CURRENT_DATE - INTERVAL '90 days';
+```
+
+---
+
+## 7. 스키마 변경 사항
 
 ### 6-1. questions 테이블 - concept_tags 컬럼 추가
 
@@ -212,7 +343,9 @@ LLM을 통해 사용자 질문의 의도와 핵심 개념을 추출한다.
 | --- | --- |
 | `src/questions/entities/question.entity.ts` | `concept_tags` (jsonb) 컬럼 추가 |
 | `src/tutor/entities/term.entity.ts` | **신규** — terms 테이블 엔티티 (hit_count 포함) |
+| `src/tutor/entities/chat-limit.entity.ts` | **신규** — user_chat_limits 테이블 엔티티 |
+| `src/tutor/guards/chat-limit.guard.ts` | **신규** — 일일 5회 사용 제한 Guard |
 | `src/tutor/dto/chat.dto.ts` | **신규** — 챗봇 요청 DTO (questionId, message, history) |
-| `src/tutor/tutor.module.ts` | Term, Exam 엔티티 등록 |
-| `src/tutor/tutor.service.ts` | 전면 리팩토링 — 해설+태그 동시 생성, intent 분류, 개념 설명/비교/추천/일반 응답, terms 캐시 검증 |
-| `src/tutor/tutor.controller.ts` | `POST /api/tutor/chat` 엔드포인트 추가, 기존 해설 API에 conceptTags 응답 추가 |
+| `src/tutor/tutor.module.ts` | Term, Exam, UserChatLimit 엔티티 등록 |
+| `src/tutor/tutor.service.ts` | 전면 리팩토링 — 해설+태그 동시 생성, intent 분류, 개념 설명/비교/추천/일반 응답, terms 캐시 검증, getRemainingCount() 추가 |
+| `src/tutor/tutor.controller.ts` | `POST /api/tutor/chat`에 JwtAuthGuard + ChatLimitGuard 적용, remainingCount 응답 추가, `GET /api/tutor/remaining-count` 엔드포인트 추가 |
