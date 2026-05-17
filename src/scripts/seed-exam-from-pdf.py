@@ -22,6 +22,7 @@ validate-pdf-parse.py 출력 결과를 DB에 저장하는 스크립트.
 """
 
 import argparse
+import csv
 import json
 import os
 import re
@@ -163,6 +164,35 @@ def parse_exam_type_from_text(text: str | None) -> int | None:
     return None
 
 
+def load_answers_csv(year: int, exam_type: int, subject_name: str, answers_dir: str) -> dict[int, list[int]]:
+    """
+    answers_dir/{year}-{N}학기.csv 에서 subject_name 과목의 정답을 읽어
+    {question_number: [answer_int, ...]} 형태로 반환.
+    파일이 없거나 과목을 찾지 못하면 {} 반환.
+    """
+    if exam_type not in (1, 2):
+        return {}  # 계절학기는 CSV 없음
+    semester = exam_type
+    csv_path = Path(answers_dir) / f"{year}-{semester}학기.csv"
+    if not csv_path.exists():
+        return {}
+
+    result: dict[int, list[int]] = {}
+    with csv_path.open(encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            if row["subject_name"].strip() != subject_name.strip():
+                continue
+            try:
+                q_num = int(row["question_number"])
+                ans_str = row["answer"].strip()
+                ans_list = [int(x) for x in ans_str.split(",") if x.strip()]
+                if ans_list:
+                    result[q_num] = ans_list
+            except (ValueError, KeyError):
+                continue
+    return result
+
+
 def main():
     load_dotenv()
 
@@ -192,6 +222,11 @@ def main():
         "--dry-run",
         action="store_true",
         help="실제 저장 없이 삽입될 내용만 출력",
+    )
+    parser.add_argument(
+        "--answers-dir",
+        default="tmp/answers",
+        help="연도별 정답 CSV 폴더 (기본값: tmp/answers)",
     )
     args = parser.parse_args()
 
@@ -242,6 +277,14 @@ def main():
         )
         sys.exit(1)
 
+    # 정답 CSV 로드 (1/2학기 기말시험만)
+    csv_subject = subject_name or ""
+    answer_map = load_answers_csv(year, exam_type or 0, csv_subject, args.answers_dir)
+    if answer_map:
+        print(f"[OK] 정답 CSV 로드 완료 — {len(answer_map)}개 문항")
+    else:
+        print("[WARN] 정답 CSV 없음 — correct_answers는 수동 입력 필요")
+
     # 정보 요약 출력
     subject_label = f"ID={args.subject_id}" if args.subject_id else subject_name
     exam_type_labels = {1: "1학기기말", 2: "2학기기말", 3: "하계계절", 4: "동계계절"}
@@ -264,16 +307,22 @@ def main():
     if args.dry_run:
         print("[DRY RUN] 아래 내용이 저장될 예정입니다 (실제 저장 안 함):\n")
         for q in questions[:5]:
+            q_num = q["questionNumber"]
+            ans = answer_map.get(q_num, [])
+            ans_str = f"정답={ans}" if ans else "정답=미확인"
             choices_preview = [
-                f"{'①②③④'[c['number']-1]}{c.get('text','')[:20]}"
+                f"{'①②③④'[c['number']-1]}{c.get('text','')[:15]}"
                 for c in q.get("choices", [])
             ]
             print(
-                f"  Q{q['questionNumber']:3d} | {(q.get('questionText') or '')[:50]:<50} | "
+                f"  Q{q_num:3d} | {ans_str:<15} | {(q.get('questionText') or '')[:40]:<40} | "
                 + " ".join(choices_preview)
             )
         if len(questions) > 5:
             print(f"  ... 외 {len(questions) - 5}개")
+        no_ans = [q["questionNumber"] for q in questions if not answer_map.get(q["questionNumber"])]
+        if no_ans:
+            print(f"\n  [WARN] 정답 미확인 문항: {no_ans}")
         print("\n[DRY RUN] 종료. 실제 저장하려면 --dry-run을 제거하세요.")
         return
 
@@ -329,17 +378,22 @@ def main():
 
                 # questions 일괄 삽입
                 rows = []
+                missing_answers = []
                 for q in questions:
                     q_img = q.get("questionImageUrls") or None
+                    q_num = q["questionNumber"]
+                    correct = answer_map.get(q_num, [])
+                    if not correct:
+                        missing_answers.append(q_num)
                     rows.append(
                         (
                             exam_id,
-                            q["questionNumber"],
+                            q_num,
                             q.get("questionText") or "",
                             q.get("exampleText"),
                             q.get("sharedExample"),
                             json.dumps(q_img) if q_img else None,
-                            json.dumps([]),          # correct_answers — 추후 수동 입력
+                            json.dumps(correct),
                             json.dumps(q.get("choices") or []),
                         )
                     )
@@ -362,10 +416,17 @@ def main():
         conn.close()
 
     print(f"\n완료. exam_id={exam_id}")
+    if missing_answers:
+        print(
+            f"\n[TODO] 정답을 찾지 못한 문항 {len(missing_answers)}개 — 수동 입력 필요:\n"
+            f"  question_number IN {tuple(missing_answers) if len(missing_answers) > 1 else f'({missing_answers[0]})'}\n"
+            f"  UPDATE questions SET correct_answers = '[정답번호]'"
+            f" WHERE exam_id = {exam_id} AND question_number IN (...);"
+        )
     if anomalies or needs_recovery:
         print(
-            "\n[TODO] 아래 문항의 correct_answers를 직접 UPDATE해야 합니다:\n"
-            f"  UPDATE questions SET correct_answers = '[정답번호]' WHERE exam_id = {exam_id} AND question_number IN (...);"
+            "\n[TODO] 이미지 포함 문항 — correct_answers 확인 필요:\n"
+            f"  exam_id={exam_id}, question_number IN {needs_recovery}"
         )
 
 
