@@ -369,13 +369,19 @@ def main():
 
     # 이미지 R2 업로드 (이미지 있는 문항만)
     if r2_client:
-        img_questions = [q for q in questions if q.get("questionImageUrls") or
-                         any(c.get("imageUrls") for c in (q.get("choices") or []))]
+        def _has_images(q):
+            return (
+                q.get("sharedExampleImageUrls") or
+                q.get("questionImageUrls") or
+                any(c.get("imageUrls") for c in (q.get("choices") or []))
+            )
+
+        img_questions = [q for q in questions if _has_images(q)]
         if img_questions:
             print(f"[..] 이미지 R2 업로드 중 ({len(img_questions)}개 문항)...")
             questions = [
                 upload_question_images(q, pdf_stem, r2_client, r2_bucket, r2_public_domain)
-                if (q.get("questionImageUrls") or any(c.get("imageUrls") for c in (q.get("choices") or [])))
+                if _has_images(q)
                 else q
                 for q in questions
             ]
@@ -396,17 +402,37 @@ def main():
                 else:
                     subject_id = get_or_create_subject(cur, subject_name)
 
-                # exam 삽입
+                # exam upsert (기존 있으면 덮어쓰기)
                 cur.execute(
-                    """
-                    INSERT INTO exams (subject_id, year, exam_type, title, total_questions)
-                    VALUES (%s, %s, %s, %s, %s)
-                    RETURNING id
-                    """,
-                    (subject_id, year, exam_type, title, len(questions)),
+                    "SELECT id FROM exams WHERE subject_id = %s AND year = %s AND exam_type = %s",
+                    (subject_id, year, exam_type),
                 )
-                exam_id = cur.fetchone()[0]
-                print(f"[OK] exams 삽입 — id={exam_id}")
+                existing = cur.fetchone()
+                if existing:
+                    exam_id = existing[0]
+                    cur.execute(
+                        "DELETE FROM questions WHERE exam_id = %s",
+                        (exam_id,),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE exams SET title = %s, total_questions = %s
+                        WHERE id = %s
+                        """,
+                        (title, len(questions), exam_id),
+                    )
+                    print(f"[OK] exams 덮어쓰기 — id={exam_id}")
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO exams (subject_id, year, exam_type, title, total_questions)
+                        VALUES (%s, %s, %s, %s, %s)
+                        RETURNING id
+                        """,
+                        (subject_id, year, exam_type, title, len(questions)),
+                    )
+                    exam_id = cur.fetchone()[0]
+                    print(f"[OK] exams 삽입 — id={exam_id}")
 
                 # questions 일괄 삽입
                 rows = []
