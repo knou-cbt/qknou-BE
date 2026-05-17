@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import base64
+import csv
 import json
 import os
 import re
@@ -1428,18 +1429,42 @@ def _render_image_mappings(report: dict, out_dir: Path) -> str:
     )
 
 
-def _render_structured_questions(questions: list[dict], page_image_paths: list[Path], out_dir: Path) -> str:
+def _render_structured_questions(
+    questions: list[dict],
+    page_image_paths: list[Path],
+    out_dir: Path,
+    answer_map: dict[int, list[int]] | None = None,
+) -> str:
     if not questions:
         return "<p style='color:#999;font-size:13px;'>(구조화 결과 없음)</p>"
+    # PDF 내부 문항번호(1-35)와 CSV 번호(36-70)가 다를 수 있으므로 오프셋 자동 계산.
+    # PDF numbers가 CSV numbers보다 낮으면 offset = min(csv_keys) - min(pdf_keys)
+    q_offset = 0
+    if answer_map and questions:
+        pdf_min = min(q["questionNumber"] for q in questions)
+        csv_min = min(answer_map.keys())
+        if csv_min > pdf_min:
+            q_offset = csv_min - pdf_min
+
     rows = []
     for q in questions:
         needs_recovery = q.get("needsNonTextRecovery", False)
         row_bg = "background:#fff8e1;" if needs_recovery else ""
         choices = q.get("choices", [])
-        choice_cells = "".join(
-            f"<td style='padding:6px 8px;font-size:12px;border-bottom:1px solid #f0f0f0;vertical-align:top;'>{_render_choice(c, out_dir)}</td>"
-            for c in choices
-        )
+        correct = set(answer_map.get(q["questionNumber"] + q_offset, [])) if answer_map else set()
+
+        def _choice_cell(c: dict) -> str:
+            num = c.get("number", 0)
+            is_correct = num in correct
+            bg = "background:#d4edda;" if is_correct else ""
+            mark = " ✓" if is_correct else ""
+            return (
+                f"<td style='padding:6px 8px;font-size:12px;border-bottom:1px solid #f0f0f0;"
+                f"vertical-align:top;{bg}'>{_render_choice(c, out_dir)}"
+                f"<span style='color:#27ae60;font-weight:700;'>{mark}</span></td>"
+            )
+
+        choice_cells = "".join(_choice_cell(c) for c in choices)
         for _ in range(4 - len(choices)):
             choice_cells += "<td style='padding:6px 8px;font-size:12px;border-bottom:1px solid #f0f0f0;color:#ccc;'>-</td>"
 
@@ -1509,6 +1534,7 @@ def generate_html_report(
     page_image_paths: list[Path],
     structured_questions: list[dict],
     out_dir: Path,
+    answer_map: dict[int, list[int]] | None = None,
 ) -> Path:
     page_sections = []
     for i in range(report["page_count"]):
@@ -1643,7 +1669,7 @@ pre{{background:#f8f9fa;padding:10px;border-radius:4px;font-size:12px;line-heigh
       <strong style="font-size:14px;">구조화된 문항 ({len(structured_questions)}개)</strong>
       <span style="font-size:12px;color:#888;">주황색 = 그림/도형 선택지 &nbsp;|&nbsp; 노란 행 = 복구 필요</span>
     </div>
-    {_render_structured_questions(structured_questions, page_image_paths, out_dir)}
+    {_render_structured_questions(structured_questions, page_image_paths, out_dir, answer_map)}
   </div>
 
   <div class="summary" style="margin-bottom:16px;">
@@ -1934,6 +1960,7 @@ def analyze_pdf(
     ocr_model: str | None,
     dpi: int,
     reuse_pages: bool = False,
+    answer_map: dict[int, list[int]] | None = None,
 ):
     out_dir.mkdir(parents=True, exist_ok=True)
     print("[..] 페이지 렌더링 중 (pymupdf)...")
@@ -2125,7 +2152,8 @@ def analyze_pdf(
         json.dump(structured_questions, f, ensure_ascii=False, indent=2)
 
     html_path = generate_html_report(
-        report, text_layer_all, ocr_texts_per_page, page_render_paths, structured_questions, out_dir
+        report, text_layer_all, ocr_texts_per_page, page_render_paths, structured_questions, out_dir,
+        answer_map=answer_map,
     )
 
     print(f"\n[OK] report.json : {report_path}")
@@ -2169,14 +2197,54 @@ def main():
         action="store_true",
         help="pages/ 폴더에 렌더링된 PNG가 있으면 재사용 (테스트 시 시간 절약)",
     )
+    parser.add_argument("--year", type=int, default=None, help="시험 연도 (정답 CSV 조회용)")
+    parser.add_argument(
+        "--exam-type",
+        type=int,
+        choices=[1, 2, 3, 4],
+        default=None,
+        help="시험 타입 (1: 1학기기말, 2: 2학기기말 — 정답 CSV 조회용)",
+    )
+    parser.add_argument("--subject-name", default=None, help="과목명 (정답 CSV 조회용)")
+    parser.add_argument(
+        "--answers-dir",
+        default="tmp/answers",
+        help="연도별 정답 CSV 폴더 (기본값: tmp/answers)",
+    )
 
     args = parser.parse_args()
     pdf_path = Path(args.pdf)
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
+    # 정답 CSV 로드 (선택적)
+    answer_map: dict[int, list[int]] = {}
+    if args.year and args.exam_type in (1, 2) and args.subject_name:
+        csv_path = Path(args.answers_dir) / f"{args.year}-{args.exam_type}학기.csv"
+        if csv_path.exists():
+            with csv_path.open(encoding="utf-8-sig") as f:
+                for row in csv.DictReader(f):
+                    if row["subject_name"].strip() != args.subject_name.strip():
+                        continue
+                    try:
+                        q = int(row["question_number"])
+                        ans = [int(x) for x in row["answer"].strip().split(",") if x.strip()]
+                        if ans:
+                            answer_map[q] = ans
+                    except (ValueError, KeyError):
+                        continue
+            if answer_map:
+                print(f"[OK] 정답 CSV 로드 — {len(answer_map)}개 문항 ({args.subject_name} {args.year} {args.exam_type}학기)")
+            else:
+                print(f"[WARN] 정답 CSV에서 '{args.subject_name}' 과목을 찾지 못했습니다: {csv_path}")
+        else:
+            print(f"[WARN] 정답 CSV 없음: {csv_path}")
+
     out_dir = Path(args.out_dir) / pdf_path.stem
-    analyze_pdf(pdf_path, out_dir, args.text_threshold, args.ocr_provider, args.ocr_model, args.dpi, args.reuse_pages)
+    analyze_pdf(
+        pdf_path, out_dir, args.text_threshold, args.ocr_provider, args.ocr_model,
+        args.dpi, args.reuse_pages, answer_map=answer_map or None,
+    )
 
 
 if __name__ == "__main__":
