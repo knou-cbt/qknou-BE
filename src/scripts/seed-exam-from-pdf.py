@@ -105,6 +105,16 @@ def upload_question_images(q: dict, pdf_stem: str, r2_client, bucket: str, publi
     q = dict(q)
     q_no = q["questionNumber"]
 
+    # sharedExampleImageUrls 업로드
+    if q.get("sharedExampleImageUrls"):
+        uploaded = []
+        for local_path in q["sharedExampleImageUrls"]:
+            fname = Path(local_path).name
+            key = f"exam-images/{pdf_stem}/q{q_no:03d}/shared_{fname}"
+            url = upload_image_to_r2(local_path, key, r2_client, bucket, public_domain)
+            uploaded.append(url or local_path)
+        q["sharedExampleImageUrls"] = uploaded
+
     # questionImageUrls 업로드
     if q.get("questionImageUrls"):
         uploaded = []
@@ -225,8 +235,8 @@ def main():
     )
     parser.add_argument(
         "--answers-dir",
-        default="tmp/answers",
-        help="연도별 정답 CSV 폴더 (기본값: tmp/answers)",
+        default="refs/answers",
+        help="연도별 정답 CSV 폴더 (기본값: refs/answers)",
     )
     args = parser.parse_args()
 
@@ -246,7 +256,16 @@ def main():
 
     # 메타데이터에서 연도/시험유형/과목명 추출 (CLI 인수가 우선)
     meta = report.get("metadata", {})
-    year = args.year or meta.get("year")
+    # 연도: CLI > PDF 파일명 앞 YYYY- 패턴 > 메타데이터
+    year = args.year
+    if not year:
+        pdf_name = Path(report.get("pdf_path", "")).name
+        m = re.match(r"^(\d{4})-", pdf_name)
+        if m:
+            year = int(m.group(1))
+            print(f"[OK] 파일명에서 연도 감지: {year}")
+    if not year:
+        year = meta.get("year")
     title = args.title or Path(report.get("pdf_path", "")).stem or out_dir.name
     subject_name = args.subject_name or (None if args.subject_id else meta.get("subjectName"))
 
@@ -285,6 +304,16 @@ def main():
     else:
         print("[WARN] 정답 CSV 없음 — correct_answers는 수동 입력 필요")
 
+    # 오프셋 계산: 시험지 Q번호와 CSV Q번호가 다를 때 자동 보정
+    # 1과목(Q1~35) → offset 0, 2과목(Q36~) → offset = pdf_min - csv_min
+    q_offset = 0
+    if answer_map and questions:
+        pdf_min = min(q["questionNumber"] for q in questions)
+        csv_min = min(answer_map.keys())
+        q_offset = pdf_min - csv_min
+        if q_offset:
+            print(f"[OK] Q번호 오프셋 감지: PDF Q{pdf_min}~ / CSV Q{csv_min}~ → offset={q_offset}")
+
     # 정보 요약 출력
     subject_label = f"ID={args.subject_id}" if args.subject_id else subject_name
     exam_type_labels = {1: "1학기기말", 2: "2학기기말", 3: "하계계절", 4: "동계계절"}
@@ -304,11 +333,14 @@ def main():
         print(f"  [WARN] 이미지 포함 문항 (correct_answers 수동 입력 필요): {needs_recovery}")
     print(f"{'=' * 50}\n")
 
+    def _lookup_answer(q_num: int) -> list:
+        return answer_map.get(q_num - q_offset, []) if answer_map else []
+
     if args.dry_run:
         print("[DRY RUN] 아래 내용이 저장될 예정입니다 (실제 저장 안 함):\n")
         for q in questions[:5]:
             q_num = q["questionNumber"]
-            ans = answer_map.get(q_num, [])
+            ans = _lookup_answer(q_num)
             ans_str = f"정답={ans}" if ans else "정답=미확인"
             choices_preview = [
                 f"{'①②③④'[c['number']-1]}{c.get('text','')[:15]}"
@@ -320,7 +352,7 @@ def main():
             )
         if len(questions) > 5:
             print(f"  ... 외 {len(questions) - 5}개")
-        no_ans = [q["questionNumber"] for q in questions if not answer_map.get(q["questionNumber"])]
+        no_ans = [q["questionNumber"] for q in questions if not _lookup_answer(q["questionNumber"])]
         if no_ans:
             print(f"\n  [WARN] 정답 미확인 문항: {no_ans}")
         print("\n[DRY RUN] 종료. 실제 저장하려면 --dry-run을 제거하세요.")
@@ -381,8 +413,9 @@ def main():
                 missing_answers = []
                 for q in questions:
                     q_img = q.get("questionImageUrls") or None
+                    q_shared_img = q.get("sharedExampleImageUrls") or None
                     q_num = q["questionNumber"]
-                    correct = answer_map.get(q_num, [])
+                    correct = _lookup_answer(q_num)
                     if not correct:
                         missing_answers.append(q_num)
                     rows.append(
@@ -392,6 +425,7 @@ def main():
                             q.get("questionText") or "",
                             q.get("exampleText"),
                             q.get("sharedExample"),
+                            json.dumps(q_shared_img) if q_shared_img else None,
                             json.dumps(q_img) if q_img else None,
                             json.dumps(correct),
                             json.dumps(q.get("choices") or []),
@@ -403,9 +437,9 @@ def main():
                     """
                     INSERT INTO questions (
                         exam_id, question_number, question_text,
-                        example_text, shared_example, question_image_urls,
-                        correct_answers, choices
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        example_text, shared_example, shared_example_image_urls,
+                        question_image_urls, correct_answers, choices
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     rows,
                     page_size=50,

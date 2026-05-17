@@ -88,6 +88,7 @@ OCR_PROMPT = r"""이 시험지 이미지에서 모든 문항을 텍스트로 추
 - [가장 중요] 박스(네모칸) 안에 있는 텍스트(배열, 수식, 코드, 예시 등)는 반드시 <보기> 박스내용 </보기> 와 같이 태그로 감싸서 명시할 것!
 - [코드블록 규칙] 들여쓰기된 프로그램 코드나 알고리즘 의사코드는 줄바꿈을 반드시 그대로 보존하고 ``` 와 ``` 로 감싸서 출력할 것. 절대 한 줄로 합치지 말 것.
 - · 항목(불릿 리스트)은 각 항목을 반드시 별도 줄로 출력할 것.
+- 번호가 붙은 보기(예: "1. 내용", "2. 내용" 또는 "ㄱ. 내용", "ㄴ. 내용")도 각 항목을 반드시 별도 줄로 출력할 것.
 - 그 외 불필요한 설명이나 주석 없이 출력"""
 
 
@@ -583,6 +584,26 @@ def _nearest_question_above(
     return nearest
 
 
+def _nearest_question_below(
+    y_px: float,
+    x_px: float,
+    q_anchors: dict,
+    page_width: float,
+) -> int | None:
+    """y_px 아래에서 같은 컬럼에 속하는 가장 가까운 문항 번호를 반환 (공통보기 이미지용)."""
+    is_right = x_px >= page_width / 2
+    nearest, nearest_dist = None, float("inf")
+    for q_no, (qx, qy) in q_anchors.items():
+        if (qx >= page_width / 2) != is_right:
+            continue
+        if qy >= y_px:
+            dist = qy - y_px
+            if dist < nearest_dist:
+                nearest_dist = dist
+                nearest = q_no
+    return nearest
+
+
 def attach_image_mappings(
     pdf_path: Path,
     structured_questions: list[dict],
@@ -790,6 +811,56 @@ def attach_image_mappings(
 
             _assign_group(left_imgs, left_targets)
             _assign_group(right_imgs, right_targets)
+
+            # 배정되지 않은 잔여 이미지 → 공통보기 이미지
+            # y-위치 × 컬럼으로 가장 가까운 문항 추론 (텍스트 앵커 없는 스캔형 PDF용)
+            import math as _math
+            assigned_imgs = {m["image"] for m in mappings if m["page"] == page_idx}
+            all_qs_sorted = sorted(qs, key=lambda q: q["questionNumber"])
+            n_qs = len(all_qs_sorted)
+            n_left_qs = _math.ceil(n_qs / 2)
+            left_col_qs = all_qs_sorted[:n_left_qs]   # 낮은 번호 → 왼쪽 컬럼
+            right_col_qs = all_qs_sorted[n_left_qs:]  # 높은 번호 → 오른쪽 컬럼
+
+            for im in page_imgs:
+                if im["saved_path"] in assigned_imgs:
+                    continue
+                bp = im.get("bbox_percent") or [0, 0, 0, 0]
+                is_right = bp[0] >= 50
+                col_qs = right_col_qs if is_right else left_col_qs
+                if not col_qs:
+                    col_qs = all_qs_sorted
+                y_frac = bp[1] / 100
+                q_idx = min(int(y_frac * len(col_qs)), len(col_qs) - 1)
+                primary_q = col_qs[q_idx]
+
+                # ※ 범위가 파싱된 문항(sharedExample 있음) → 공통보기: 범위 내 전체 배정
+                # ※ 없음 → 단독 보기: primary 문항 하나에만 questionImageUrls 배정
+                se = primary_q.get("sharedExample") or ""
+                r = _parse_shared_range(se) if se else None
+                if r:
+                    from_q, until_q = r
+                    shared_targets = [q for q in all_qs_sorted if from_q <= q["questionNumber"] <= until_q]
+                    mapped_to = "shared"
+                    for tq in shared_targets:
+                        tq["sharedExampleImageUrls"] = (tq.get("sharedExampleImageUrls") or []) + [im["saved_path"]]
+                    ref_qno = primary_q["questionNumber"]
+                    label = f"Q{from_q}~Q{until_q} ← {Path(im['saved_path']).name} (공통보기)"
+                else:
+                    # 단독 보기: questionImageUrls에 배정
+                    mapped_to = "question"
+                    primary_q["questionImageUrls"] = (primary_q.get("questionImageUrls") or []) + [im["saved_path"]]
+                    ref_qno = primary_q["questionNumber"]
+                    label = f"Q{ref_qno} ← {Path(im['saved_path']).name} (단독보기)"
+
+                mappings.append({
+                    "page": page_idx,
+                    "image": im["saved_path"],
+                    "bbox_percent": im.get("bbox_percent"),
+                    "questionNumber": ref_qno,
+                    "mappedTo": mapped_to,
+                })
+                print(f"  [fallback] {label}")
             continue
 
         # ── 2) 선택지 마커 앵커 수집 ──
@@ -838,8 +909,13 @@ def attach_image_mappings(
             img_left_px = bp[0] / 100 * pw
 
             q_no = _nearest_question_above(img_top_px, img_left_px, q_anchors, pw)
+            is_shared = False
             if q_no is None or q_no not in q_map:
-                continue
+                # 공통보기 이미지: 문항보다 위에 있어 above가 None → below로 폴백
+                q_no = _nearest_question_below(img_top_px, img_left_px, q_anchors, pw)
+                if q_no is None or q_no not in q_map:
+                    continue
+                is_shared = True
 
             # 위치 결정: choice > example > body 순서로 판단
             position = "body"
@@ -874,7 +950,18 @@ def attach_image_mappings(
                     position = "example"
 
             q = q_map[q_no]
-            if position in ("body", "example"):
+            if is_shared:
+                # 공통보기 이미지: 아래 첫 문항의 sharedExampleImageUrls에 배정
+                # 같은 sharedExample 텍스트를 가진 다른 문항들도 함께 배정
+                shared_text = q.get("sharedExample") or ""
+                target_qs = (
+                    [qq for qq in q_map.values() if qq.get("sharedExample") == shared_text and shared_text]
+                    if shared_text else [q]
+                )
+                for tq in target_qs:
+                    tq["sharedExampleImageUrls"] = (tq.get("sharedExampleImageUrls") or []) + [im["saved_path"]]
+                position = "shared"
+            elif position in ("body", "example"):
                 q["questionImageUrls"] = (q.get("questionImageUrls") or []) + [im["saved_path"]]
             elif position.startswith("choice"):
                 num = int(position[6:])
@@ -1328,6 +1415,188 @@ def _html_escape(text: str) -> str:
     )
 
 
+def _rel_path(path: str | Path, out_dir: Path) -> str:
+    try:
+        return Path(path).relative_to(out_dir).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def generate_preview_html(
+    structured_questions: list[dict],
+    page_image_paths: list[Path],
+    image_mappings: list[dict],
+    out_dir: Path,
+    answer_map: dict[int, list[int]] | None = None,
+    title: str = "Preview",
+) -> Path:
+    from collections import defaultdict
+
+    q_offset = 0
+    if answer_map and structured_questions:
+        pdf_min = min(q["questionNumber"] for q in structured_questions)
+        csv_min = min(answer_map.keys())
+        q_offset = pdf_min - csv_min  # 양방향: 1과목(0), 2과목(+35)
+
+    imgs_by_page: dict[int, list[dict]] = defaultdict(list)
+    for m in image_mappings:
+        imgs_by_page[m["page"]].append(m)
+
+    qs_by_page: dict[int, list[dict]] = defaultdict(list)
+    for q in structured_questions:
+        qs_by_page[q.get("page", 1)].append(q)
+
+    palette = ["#e74c3c", "#3498db", "#27ae60", "#f39c12", "#9b59b6", "#1abc9c", "#7760f0", "#e67e22"]
+    NUMS = "①②③④"
+
+    def choice_label(n: int) -> str:
+        return NUMS[n - 1] if 1 <= n <= 4 else str(n)
+
+    page_blocks = []
+    for i, img_path in enumerate(page_image_paths):
+        page_num = i + 1
+        rel = _rel_path(img_path, out_dir)
+
+        bbox_divs = ""
+        for j, m in enumerate(imgs_by_page.get(page_num, [])):
+            bp = m.get("bbox_percent", [])
+            if len(bp) < 4:
+                continue
+            x0, y0, x1, y1 = bp
+            color = palette[j % len(palette)]
+            label = f"Q{m.get('questionNumber','?')} {m.get('mappedTo','')}"
+            bbox_divs += (
+                f'<div class="bbox" style="left:{x0:.2f}%;top:{y0:.2f}%;'
+                f'width:{x1-x0:.2f}%;height:{y1-y0:.2f}%;border-color:{color}">'
+                f'<span class="bbox-label" style="background:{color}">{label}</span></div>'
+            )
+
+        q_cards = ""
+        for q in sorted(qs_by_page.get(page_num, []), key=lambda x: x["questionNumber"]):
+            q_no = q["questionNumber"]
+            correct = set(answer_map.get(q_no - q_offset, [])) if answer_map else set()
+            choices = q.get("choices") or []
+            q_imgs = q.get("questionImageUrls") or []
+            has_warn = (
+                len(choices) not in (0, 4)
+                or q.get("needsNonTextRecovery")
+                or (answer_map is not None and not correct)
+            )
+            badge = (
+                '<span class="badge badge-warn">!</span>'
+                if has_warn
+                else '<span class="badge badge-ok">✓</span>'
+            )
+            ans_label = ""
+            if correct:
+                ans_txt = ", ".join(choice_label(a) for a in sorted(correct))
+                ans_label = f'<span class="badge" style="background:#555;margin-left:auto">정답 {ans_txt}</span>'
+
+            shared_html = ""
+            if q.get("sharedExample") or q.get("sharedExampleImageUrls"):
+                shared_imgs_html = ""
+                for p in (q.get("sharedExampleImageUrls") or []):
+                    shared_imgs_html += f'<img src="{_rel_path(p, out_dir)}" class="qimg" style="max-height:160px;max-width:280px;display:block;margin-top:4px;">'
+                shared_html = (
+                    f'<div class="shared-box">'
+                    f'{_html_escape(q.get("sharedExample") or "")}'
+                    f'{shared_imgs_html}'
+                    f'</div>'
+                )
+
+            body_imgs_html = ""
+            if q_imgs:
+                imgs = "".join(
+                    f'<img src="{_rel_path(p, out_dir)}" class="qimg" style="max-height:120px;max-width:200px;">'
+                    for p in q_imgs
+                )
+                body_imgs_html = f'<div class="img-group"><div class="img-role">본문 이미지</div><div class="img-row">{imgs}</div></div>'
+
+            qtext_html = ""
+            if q.get("questionText"):
+                qtext_html = f'<div class="qtext">{_html_escape(q["questionText"])}</div>'
+
+            choices_html = ""
+            c_img_choices = [c for c in choices if c.get("imageUrls")]
+            if c_img_choices:
+                items = []
+                for c in c_img_choices:
+                    num = c.get("number", 0)
+                    is_correct = num in correct
+                    lbl = choice_label(num)
+                    imgs = "".join(
+                        f'<img src="{_rel_path(p, out_dir)}" class="qimg" style="max-height:80px;max-width:120px;">'
+                        for p in (c.get("imageUrls") or [])
+                    )
+                    border = "border:2px solid #27ae60;" if is_correct else "border:2px solid transparent;"
+                    items.append(
+                        f'<div class="cimg-wrap" style="{border}padding:4px;border-radius:4px">'
+                        f'<div class="cimg-label">{lbl}</div>{imgs}</div>'
+                    )
+                choices_html = (
+                    f'<div class="img-group"><div class="img-role">선택지 (이미지)</div>'
+                    f'<div class="choice-row">{"".join(items)}</div></div>'
+                )
+
+            q_cards += (
+                f'<div class="qcard">'
+                f'<div class="qcard-hd"><span>Q{q_no}</span>{badge}{ans_label}</div>'
+                f'<div class="qcard-body">{shared_html}{body_imgs_html}{qtext_html}{choices_html}</div>'
+                f'</div>'
+            )
+
+        page_blocks.append(
+            f'<div class="sec"><h2>Page {page_num}</h2>'
+            f'<div class="page-row">'
+            f'<div><h3>원본 페이지</h3>'
+            f'<div class="page-img-wrap">'
+            f'<img src="{rel}" style="width:680px;display:block">'
+            f'{bbox_divs}</div></div>'
+            f'<div class="qcol"><h3>파싱 결과</h3>{q_cards}</div>'
+            f'</div></div>'
+        )
+
+    css = """*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;padding:20px}
+h1{font-size:20px;margin-bottom:16px;color:#2c3e50}
+h2{font-size:15px;color:#2c3e50;margin-bottom:12px}
+h3{font-size:12px;color:#555;margin-bottom:6px;font-weight:600}
+.sec{background:white;border-radius:10px;padding:18px;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.page-row{display:flex;gap:20px;align-items:flex-start}
+.page-img-wrap{position:relative;display:inline-block;flex:0 0 auto}
+.bbox{position:absolute;border:2px solid;pointer-events:none}
+.bbox-label{position:absolute;top:-1px;left:-1px;font-size:9px;color:white;padding:1px 4px;border-radius:2px;white-space:nowrap;font-weight:700}
+.qcol{flex:1;overflow-y:auto;max-height:1200px}
+.qcard{border:1px solid #e0e0e0;border-radius:6px;margin-bottom:10px;overflow:hidden}
+.qcard-hd{background:#2c3e50;color:white;padding:6px 12px;font-size:13px;font-weight:600;display:flex;gap:8px;align-items:center}
+.badge{font-size:10px;padding:1px 6px;border-radius:3px;font-weight:700}
+.badge-ok{background:#27ae60}.badge-warn{background:#e74c3c}
+.qcard-body{padding:10px 12px}
+.shared-box{background:#fff8e0;border-left:3px solid #f90;padding:4px 8px;margin-bottom:6px;font-size:11px;color:#555}
+.img-group{margin-bottom:8px}
+.img-role{font-size:10px;font-weight:700;color:#888;text-transform:uppercase;margin-bottom:4px}
+.img-row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.qimg{border:1px solid #ddd;border-radius:3px}
+.cimg-wrap{text-align:center}
+.cimg-label{font-size:14px;font-weight:700;color:#2c3e50;margin-bottom:2px}
+.qtext{font-size:11px;color:#333;margin-bottom:6px;line-height:1.5}
+.choice-row{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end}
+.choice-txt{font-size:11px;color:#333;padding:2px 0}"""
+
+    html = (
+        f'<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">'
+        f'<title>Preview — {_html_escape(title)}</title>'
+        f'<style>{css}</style></head>'
+        f'<body><h1>Image Preview — {_html_escape(title)}</h1>'
+        f'{"".join(page_blocks)}'
+        f'</body></html>'
+    )
+
+    preview_path = out_dir / "preview.html"
+    preview_path.write_text(html, encoding="utf-8")
+    return preview_path
+
+
 def _render_choice(choice: dict, out_dir: Path) -> str:
     text = choice.get("text", "")
     if text == "[그림]":
@@ -1437,21 +1706,18 @@ def _render_structured_questions(
 ) -> str:
     if not questions:
         return "<p style='color:#999;font-size:13px;'>(구조화 결과 없음)</p>"
-    # PDF 내부 문항번호(1-35)와 CSV 번호(36-70)가 다를 수 있으므로 오프셋 자동 계산.
-    # PDF numbers가 CSV numbers보다 낮으면 offset = min(csv_keys) - min(pdf_keys)
     q_offset = 0
     if answer_map and questions:
         pdf_min = min(q["questionNumber"] for q in questions)
         csv_min = min(answer_map.keys())
-        if csv_min > pdf_min:
-            q_offset = csv_min - pdf_min
+        q_offset = pdf_min - csv_min  # 양방향: 1과목(0), 2과목(+35)
 
     rows = []
     for q in questions:
         needs_recovery = q.get("needsNonTextRecovery", False)
         row_bg = "background:#fff8e1;" if needs_recovery else ""
         choices = q.get("choices", [])
-        correct = set(answer_map.get(q["questionNumber"] + q_offset, [])) if answer_map else set()
+        correct = set(answer_map.get(q["questionNumber"] - q_offset, [])) if answer_map else set()
 
         def _choice_cell(c: dict) -> str:
             num = c.get("number", 0)
@@ -1830,9 +2096,26 @@ def parse_choices_from_block(block: str):
     return deduped, stem_part
 
 
+_SHARED_RANGE_RE = re.compile(
+    r'(\d+)\s*[~\-]\s*(\d+)\s*번?'          # 13~14번, 13-14
+    r'|[(\[]\s*(\d+)\s*[~\-]\s*(\d+)\s*[)\]]'  # (13~14), [13-14]
+)
+
+
+def _parse_shared_range(text: str) -> tuple[int, int] | None:
+    """※ 텍스트에서 (시작번호, 끝번호) 추출. 없으면 None."""
+    m = _SHARED_RANGE_RE.search(text)
+    if not m:
+        return None
+    if m.group(1):
+        return int(m.group(1)), int(m.group(2))
+    return int(m.group(3)), int(m.group(4))
+
+
 def parse_structured_questions(page_ocr_texts: list[str]):
     by_qn = {}
     pending_shared: str | None = None
+    pending_shared_from: int = 1
     pending_shared_until: int = 9999  # ※ 범위의 마지막 문항 번호
 
     for page_idx, page_text in enumerate(page_ocr_texts, start=1):
@@ -1845,8 +2128,9 @@ def parse_structured_questions(page_ocr_texts: list[str]):
                 note_text = normalize_ws(preamble[note_start:])
                 if note_text:
                     pending_shared = note_text
-                    m_range = re.search(r'[(\[]\s*\d+\s*[~\-]\s*(\d+)\s*[)\]]', note_text)
-                    pending_shared_until = int(m_range.group(1)) if m_range else 9999
+                    r = _parse_shared_range(note_text)
+                    pending_shared_from  = r[0] if r else 1
+                    pending_shared_until = r[1] if r else 9999
 
         raw_blocks = split_question_blocks(page_text)
         for qn, block, shared_note in raw_blocks:
@@ -1882,7 +2166,7 @@ def parse_structured_questions(page_ocr_texts: list[str]):
                 "page": page_idx,
                 "questionText": question_text,
                 "exampleText": example_text,
-                "sharedExample": pending_shared if qn <= pending_shared_until else None,
+                "sharedExample": pending_shared if pending_shared_from <= qn <= pending_shared_until else None,
                 "sharedExampleImageUrls": None,
                 "questionImageUrls": None,
                 "choices": choices if choices else [],
@@ -1945,9 +2229,9 @@ def parse_structured_questions(page_ocr_texts: list[str]):
             # 이 블록 말미의 ※ → 다음 문항부터 적용 (새 ※가 나오면 교체)
             if shared_note is not None:
                 pending_shared = shared_note
-                # "※ (16~18)" 또는 "※ (16-18)" 형태에서 마지막 번호 파싱
-                m = re.search(r'[(\[]\s*\d+\s*[~\-]\s*(\d+)\s*[)\]]', shared_note)
-                pending_shared_until = int(m.group(1)) if m else 9999
+                r = _parse_shared_range(shared_note)
+                pending_shared_from  = r[0] if r else 1
+                pending_shared_until = r[1] if r else 9999
 
     return [by_qn[k] for k in sorted(by_qn.keys())]
 
@@ -2156,16 +2440,26 @@ def analyze_pdf(
         answer_map=answer_map,
     )
 
+    preview_path = generate_preview_html(
+        structured_questions,
+        page_render_paths,
+        normalized_image_mappings,
+        out_dir,
+        answer_map=answer_map,
+        title=pdf_path.stem,
+    )
+
     print(f"\n[OK] report.json : {report_path}")
     print(f"[OK] image-mapping : {image_mapping_path}")
     print(f"[OK] structured : {structured_path}")
     print(f"[OK] report.html : {html_path}")
+    print(f"[OK] preview.html : {preview_path}")
     print(f"[OK] pages={report['page_count']} text_chars={total_text_chars} embedded_images={len(extracted_images)}")
     if blockers:
         print("\n[WARN] blockers:")
         for b in blockers:
             print(f"  - {b}")
-    print(f"\n브라우저에서 열기:\n  {html_path}")
+    print(f"\n브라우저에서 열기:\n  {preview_path}")
 
 
 def main():
@@ -2197,6 +2491,11 @@ def main():
         action="store_true",
         help="pages/ 폴더에 렌더링된 PNG가 있으면 재사용 (테스트 시 시간 절약)",
     )
+    parser.add_argument(
+        "--preview-only",
+        action="store_true",
+        help="기존 structured-questions.json + image-mapping.json으로 preview.html만 재생성 (OCR 생략)",
+    )
     parser.add_argument("--year", type=int, default=None, help="시험 연도 (정답 CSV 조회용)")
     parser.add_argument(
         "--exam-type",
@@ -2208,8 +2507,8 @@ def main():
     parser.add_argument("--subject-name", default=None, help="과목명 (정답 CSV 조회용)")
     parser.add_argument(
         "--answers-dir",
-        default="tmp/answers",
-        help="연도별 정답 CSV 폴더 (기본값: tmp/answers)",
+        default="refs/answers",
+        help="연도별 정답 CSV 폴더 (기본값: refs/answers)",
     )
 
     args = parser.parse_args()
@@ -2217,10 +2516,18 @@ def main():
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
+    # 파일명 앞 YYYY- 패턴에서 연도 자동 추출 (예: 2015-244-이산수학...)
+    year = args.year
+    if year is None:
+        m = re.match(r"^(\d{4})-", pdf_path.name)
+        if m:
+            year = int(m.group(1))
+            print(f"[OK] 파일명에서 연도 감지: {year}")
+
     # 정답 CSV 로드 (선택적)
     answer_map: dict[int, list[int]] = {}
-    if args.year and args.exam_type in (1, 2) and args.subject_name:
-        csv_path = Path(args.answers_dir) / f"{args.year}-{args.exam_type}학기.csv"
+    if year and args.exam_type in (1, 2) and args.subject_name:
+        csv_path = Path(args.answers_dir) / f"{year}-{args.exam_type}학기.csv"
         if csv_path.exists():
             with csv_path.open(encoding="utf-8-sig") as f:
                 for row in csv.DictReader(f):
@@ -2234,13 +2541,56 @@ def main():
                     except (ValueError, KeyError):
                         continue
             if answer_map:
-                print(f"[OK] 정답 CSV 로드 — {len(answer_map)}개 문항 ({args.subject_name} {args.year} {args.exam_type}학기)")
+                print(f"[OK] 정답 CSV 로드 — {len(answer_map)}개 문항 ({args.subject_name} {year} {args.exam_type}학기)")
             else:
                 print(f"[WARN] 정답 CSV에서 '{args.subject_name}' 과목을 찾지 못했습니다: {csv_path}")
         else:
             print(f"[WARN] 정답 CSV 없음: {csv_path}")
 
     out_dir = Path(args.out_dir) / pdf_path.stem
+
+    if args.preview_only:
+        sq_path = out_dir / "structured-questions.json"
+        im_path = out_dir / "image-mapping.json"
+        if not sq_path.exists():
+            raise FileNotFoundError(f"structured-questions.json 없음: {sq_path}")
+        with open(sq_path, encoding="utf-8") as f:
+            structured_questions = json.load(f)
+        image_mappings = json.loads(im_path.read_text(encoding="utf-8")) if im_path.exists() else []
+        page_render_paths = sorted((out_dir / "pages").glob("page_*.png"))
+
+        # answer_map이 비어 있으면 report.json 메타데이터로 자동 로드 시도
+        if not answer_map:
+            rpt = out_dir / "report.json"
+            if rpt.exists():
+                meta = json.loads(rpt.read_text(encoding="utf-8")).get("metadata", {})
+                auto_year = meta.get("year") or year
+                auto_subject = args.subject_name or meta.get("subjectName")
+                auto_sem = args.exam_type or meta.get("semester") or 1
+                if auto_year and auto_subject:
+                    csv_path = Path(args.answers_dir) / f"{auto_year}-{auto_sem}학기.csv"
+                    if csv_path.exists():
+                        with csv_path.open(encoding="utf-8-sig") as f:
+                            for row in csv.DictReader(f):
+                                if row["subject_name"].strip() != auto_subject.strip():
+                                    continue
+                                try:
+                                    q = int(row["question_number"])
+                                    ans = [int(x) for x in row["answer"].strip().split(",") if x.strip()]
+                                    if ans:
+                                        answer_map[q] = ans
+                                except (ValueError, KeyError):
+                                    continue
+                        if answer_map:
+                            print(f"[OK] 정답 자동 로드 ({auto_subject} {auto_year}-{auto_sem}학기, {len(answer_map)}문항)")
+
+        preview_path = generate_preview_html(
+            structured_questions, page_render_paths, image_mappings,
+            out_dir, answer_map=answer_map or None,
+        )
+        print(f"[OK] preview.html 재생성: {preview_path}")
+        return
+
     analyze_pdf(
         pdf_path, out_dir, args.text_threshold, args.ocr_provider, args.ocr_model,
         args.dpi, args.reuse_pages, answer_map=answer_map or None,
