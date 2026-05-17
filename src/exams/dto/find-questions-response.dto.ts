@@ -39,6 +39,14 @@ export class QuestionDto {
   example: string | null;
 
   @ApiPropertyOptional({
+    description: '공통보기 이미지 URL 배열 (없으면 null)',
+    type: [String],
+    nullable: true,
+    example: null,
+  })
+  sharedExampleImageUrls: string[] | null;
+
+  @ApiPropertyOptional({
     description:
       '문제에 첨부된 이미지 URL 배열 (문장 중간/보기 그림 등, 없으면 null)',
     type: [String],
@@ -51,6 +59,14 @@ export class QuestionDto {
 
   @ApiProperty({ description: '선택지 목록', type: [ChoiceDto] })
   choices: ChoiceDto[];
+
+  @ApiPropertyOptional({
+    description: '개념 태그 배열 (없으면 null)',
+    type: [String],
+    nullable: true,
+    example: null,
+  })
+  conceptTags: string[] | null;
 }
 
 /**

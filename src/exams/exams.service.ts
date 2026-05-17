@@ -79,8 +79,10 @@ export class ExamsService {
       'question.question_text',
       'question.example_text',
       'question.shared_example',
+      'question.shared_example_image_urls',
       'question.question_image_urls',
       'question.choices',
+      'question.concept_tags',
     ];
 
     // study 모드일 때만 정답/해설 필드 추가
@@ -127,8 +129,10 @@ export class ExamsService {
           sharedExample: question.shared_example
             ? formatCodeBlocks(question.shared_example)
             : question.shared_example,
+          sharedExampleImageUrls: question.shared_example_image_urls,
           imageUrls: question.question_image_urls,
           choices: question.choices,
+          conceptTags: question.concept_tags,
         };
 
         //study 모드일때만 정답 및 해설 포함

@@ -1,4 +1,5 @@
-// New Relic은 가장 먼저 로드되어야 합니다
+// Sentry와 New Relic은 가장 먼저 로드되어야 합니다
+import './instrument';
 /* eslint-disable @typescript-eslint/no-require-imports */
 if (process.env.NEW_RELIC_LICENSE_KEY) {
   require('newrelic');

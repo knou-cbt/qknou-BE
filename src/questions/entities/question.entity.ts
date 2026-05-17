@@ -31,6 +31,9 @@ export class Questsion {
   shared_example: string;
 
   @Column({ type: 'jsonb', nullable: true })
+  shared_example_image_urls: string[];
+
+  @Column({ type: 'jsonb', nullable: true })
   question_image_urls: string[];
 
   @Column({ type: 'jsonb', nullable: false })
