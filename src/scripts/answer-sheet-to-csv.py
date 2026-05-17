@@ -64,13 +64,8 @@ def detect_page_format(page_blocks: list[tuple]) -> tuple[str, int]:
     Returns:
         (format, start_q):
             format: 'grouped' | 'individual'
-            start_q: 36 or 1
+            start_q: 항상 1 (각 과목은 Q1부터 시작; 페이지 헤더의 "36~40"은 열 레이블일 뿐)
     """
-    all_text = "\n".join(text for *_, text, _ in page_blocks if isinstance(text, str))
-
-    has_36_40 = bool(re.search(r"36~40", all_text))
-    has_1_5 = bool(re.search(r"1~5", all_text))
-
     # 2020 1학기: 개별 번호 열 (1, 2, 3 ... 35)
     # 특징: 5자 블록이나 스페이스-5 패턴이 없고, 단일 digit 라인만 있음
     has_grouped_data = False
@@ -85,13 +80,8 @@ def detect_page_format(page_blocks: list[tuple]) -> tuple[str, int]:
         if has_grouped_data:
             break
 
-    if not has_grouped_data:
-        fmt = "individual"
-    else:
-        fmt = "grouped"
-
-    start_q = 36 if has_36_40 else 1
-    return fmt, start_q
+    fmt = "individual" if not has_grouped_data else "grouped"
+    return fmt, 1
 
 
 def parse_data_block(text: str, fmt: str, start_q: int) -> dict | None:
