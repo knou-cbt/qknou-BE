@@ -63,8 +63,8 @@ export class TutorService {
     question: Questsion,
   ): Promise<{ explanation: string; conceptTags: string[] }> {
     const systemPrompt = `KNOU 기출문제 해설 생성. JSON만 출력.
-규칙: 각 선택지를 "N번. 개념명 — 한 문장 설명" 형식으로 작성. 정답/오답 구분 표시 없음. 오답은 틀렸다는 표현 없이 그 개념이 무엇인지만 설명. 영문 명칭이 실제로 존재하는 용어에 한해 "한글발음(English)" 형식으로 표기하고, 한글 전용 개념은 그냥 한글만 쓸 것. 말투는 "~이다, ~때문이다" 체로 간결하게. 이모지 금지.
-{"explanation":"1번. 개념명 — 설명\n2번. 개념명 — 설명\n...","concept_tags":["개념1","개념2"]}
+규칙: 각 선택지를 "N번. 개념명\n설명" 형식으로 작성. 선택지 사이는 빈 줄(\\n\\n)로 구분. 정답/오답 구분 표시 없음. 오답은 틀렸다는 표현 없이 그 개념이 무엇인지만 설명. 영문 명칭이 실제로 존재하는 용어에 한해 "한글발음(English)" 형식으로 표기하고, 한글 전용 개념은 그냥 한글만 쓸 것. 말투는 "~이다, ~때문이다" 체로 간결하게. 이모지 금지.
+{"explanation":"1번. 개념명\\n설명\\n\\n2번. 개념명\\n설명\\n\\n...","concept_tags":["개념1","개념2"]}
 concept_tags: 핵심 학술 개념 2~4개, 소문자, 일반어 제외.`;
 
     const userPrompt = `문제: ${question.question_text}${question.example_text ? `\n보기: ${question.example_text}` : ''}
