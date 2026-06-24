@@ -10,6 +10,7 @@ import argparse
 import csv
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 try:
@@ -35,7 +36,7 @@ SPACED5_RE = re.compile(r"^[1-4A-K] [1-4A-K] [1-4A-K] [1-4A-K] [1-4A-K]$")
 SINGLE_RE = re.compile(r"^[1-4A-K]$")
 
 
-def decode_char(c: str) -> str | None:
+def decode_char(c: str) -> "Optional[str]":
     """'1'-'4' 또는 'A'-'K' → answer string. 공백/무효 → None."""
     c = c.strip().upper()
     if not c or c == IDEOGRAPHIC_SPACE:
@@ -47,7 +48,7 @@ def decode_char(c: str) -> str | None:
     return None
 
 
-def decode_group(line: str) -> list[str | None]:
+def decode_group(line: str) -> list:
     """한 그룹 라인을 5개 답으로 분해."""
     line = line.strip()
     if BLOCK5_RE.match(line):
@@ -84,7 +85,7 @@ def detect_page_format(page_blocks: list[tuple]) -> tuple[str, int]:
     return fmt, 1
 
 
-def parse_data_block(text: str, fmt: str, start_q: int) -> dict | None:
+def parse_data_block(text: str, fmt: str, start_q: int):
     """
     단일 블록 텍스트를 파싱하여 subject 정보를 반환.
 
@@ -161,7 +162,8 @@ def parse_pdf(pdf_path: Path) -> list[dict]:
     Returns list of:
         {year, semester, grade, subject_name, question_number, answer}
     """
-    fname = pdf_path.name
+    # macOS NFD 파일명을 NFC로 정규화해서 한글 매칭
+    fname = unicodedata.normalize('NFC', pdf_path.name)
 
     # 연도 추출
     year_m = re.search(r"(\d{4})", fname)

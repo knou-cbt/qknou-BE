@@ -73,6 +73,32 @@ export class CrawlerService {
   }
 
   /**
+   * HTML에서 span.iub(밑줄)를 <u> 태그로 변환하고 나머지 태그는 제거.
+   * <br> 태그는 줄바꿈으로 변환.
+   */
+  private extractTextWithUnderline(
+    $el: ReturnType<ReturnType<typeof cheerio.load>>,
+    $: ReturnType<typeof cheerio.load>,
+  ): string {
+    const clone = $el.clone();
+    clone.find('span.iub').each((_, span) => {
+      const $span = $(span);
+      $span.replaceWith(`<u>${$span.html()}</u>`);
+    });
+    clone.find('br').replaceWith('\n');
+    const html = clone.html() || '';
+    return html
+      .replace(/<(?!\/?u[ >])[^>]+>/g, '') // <u>/<\/u> 제외 모든 태그 제거
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec)))
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .trim();
+  }
+
+  /**
    * 로그 디렉토리 생성 (없으면)
    */
   private ensureLogDirectory(): void {
@@ -225,7 +251,7 @@ export class CrawlerService {
   /**
    * 3단계: 개별 시험지 크롤링 및 DB 저장
    */
-  async crawlExam(url: string, forceRetry: boolean = false) {
+  async crawlExam(url: string, forceRetry: boolean = false, skipAnswers: boolean = false, grade?: string) {
     // ========================================
     // 1단계: HTML 다운로드 및 파싱
     // ========================================
@@ -302,7 +328,7 @@ export class CrawlerService {
     }
 
     const examType = parseExamType(examTypeText); // enum 함수 사용
-    const title = subjectName;
+    const title = grade ? `${subjectName}(${grade})` : subjectName;
 
     console.log(`  - 과목: ${subjectName}`);
     console.log(`  - 시험 종류: ${examTypeText} (타입: ${examType})`);
@@ -322,6 +348,7 @@ export class CrawlerService {
       questionText: string;
       exampleText: string | null;
       sharedExample: string | null;
+      sharedExampleImageUrls: string[] | null;
       questionImageUrls: string[] | null;
       choices: Array<{
         number: number;
@@ -345,8 +372,9 @@ export class CrawlerService {
       console.log('  📌 allaBasicTbl 사용');
     }
 
-    // 공통 보기 저장용 Map: 문제 번호 → 공통 보기 텍스트
+    // 공통 보기 저장용 Map: 문제 번호 → 공통 보기 텍스트/이미지
     const sharedExampleMap = new Map<number, string>();
+    const sharedExampleImageMap = new Map<number, string[]>();
 
     // 1차: 공통 보기(※) 블록 파싱
     $(`span.alla6QuestionNo, span.allaQuestionNo`).each((_, element) => {
@@ -395,9 +423,25 @@ export class CrawlerService {
             // 방법 1: allaExampleList_p (일반 텍스트)
             const exampleP = exampleTxtRow.find('.allaExampleList_p');
             if (exampleP.length > 0) {
-              const txtContent = exampleP.text().trim();
+              const lines: string[] = [];
+              exampleP.each((_, el) => {
+                lines.push(this.extractTextWithUnderline($(el), $));
+              });
+              const txtContent = lines.join('\n');
               if (txtContent) {
                 sharedText = `${sharedText}\n\n${txtContent}`;
+              }
+            }
+
+            // 방법 1-1: allaExampleList_circle (㉠㉡㉢ 항목)
+            const exampleCircle = exampleTxtRow.find('.allaExampleList_circle');
+            if (exampleCircle.length > 0) {
+              const circleLines: string[] = [];
+              exampleCircle.each((_, div) => {
+                circleLines.push(this.extractTextWithUnderline($(div), $));
+              });
+              if (circleLines.length > 0) {
+                sharedText = `${sharedText}\n${circleLines.join('\n')}`;
               }
             }
 
@@ -421,18 +465,50 @@ export class CrawlerService {
               '.allaExampleAlign_center',
             );
             if (exampleCenter.length > 0) {
-              const centerContent = exampleCenter.text().trim();
+              const centerContent = this.extractTextWithUnderline(
+                exampleCenter,
+                $,
+              );
               if (centerContent) {
                 sharedText = `${sharedText}\n\n${centerContent}`;
               }
             }
+
+            // 방법 4 (fallback): 위 형태 없으면 td 전체 텍스트 (밑줄 보존)
+            const $td = exampleTxtRow.find('td');
+            if (
+              exampleP.length === 0 &&
+              exampleCircle.length === 0 &&
+              exampleDivs.length === 0 &&
+              exampleCenter.length === 0
+            ) {
+              const rawText = this.extractTextWithUnderline($td, $);
+              if (rawText) {
+                sharedText = `${sharedText}\n\n${rawText}`;
+              }
+            }
+          }
+
+          // 공통 보기의 이미지 추출
+          const sharedImageUrls: string[] = [];
+          const exampleImgRow = $parentTbody.find(
+            'tr.alla6ExampleTr_Img, tr.allaExampleTr_Img',
+          );
+          if (exampleImgRow.length > 0) {
+            exampleImgRow.find('img').each((_, img) => {
+              const src = $(img).attr('src');
+              if (src) sharedImageUrls.push(src);
+            });
           }
 
           for (let i = startNum; i <= endNum; i++) {
             sharedExampleMap.set(i, sharedText);
+            if (sharedImageUrls.length > 0) {
+              sharedExampleImageMap.set(i, sharedImageUrls);
+            }
           }
 
-          console.log(`  📌 공통 보기 감지: 문제 ${startNum}~${endNum}`);
+          console.log(`  📌 공통 보기 감지: 문제 ${startNum}~${endNum}${sharedImageUrls.length > 0 ? ` (이미지 ${sharedImageUrls.length}개)` : ''}`);
         } else {
           console.log(
             `  ⚠️  공통 보기 구간 패턴 매칭 실패: "${fullText.substring(0, 80)}"`,
@@ -463,7 +539,23 @@ export class CrawlerService {
           // 방법 1: allaExampleList_p 클래스 (일반 텍스트 보기)
           const exampleP = $td.find('.allaExampleList_p');
           if (exampleP.length > 0) {
-            exampleParts.push(exampleP.text().trim());
+            const lines: string[] = [];
+            exampleP.each((_, el) => {
+              lines.push(this.extractTextWithUnderline($(el), $));
+            });
+            exampleParts.push(lines.join('\n'));
+          }
+
+          // 방법 1-1: allaExampleList_circle 클래스 (㉠㉡㉢ 보기 항목)
+          const exampleCircle = $td.find('.allaExampleList_circle');
+          if (exampleCircle.length > 0) {
+            const circleLines: string[] = [];
+            exampleCircle.each((_, div) => {
+              circleLines.push(this.extractTextWithUnderline($(div), $));
+            });
+            if (circleLines.length > 0) {
+              exampleParts.push(circleLines.join('\n'));
+            }
           }
 
           // 방법 2: allaExampleList_bleft_* 클래스 (코드 형태 - div로 들여쓰기된 코드)
@@ -484,17 +576,32 @@ export class CrawlerService {
           if (exampleEng.length > 0) {
             const engLines: string[] = [];
             exampleEng.each((_, div) => {
-              engLines.push($(div).text().trim());
+              engLines.push(this.extractTextWithUnderline($(div), $));
             });
             if (engLines.length > 0) {
               exampleParts.push(engLines.join('\n'));
             }
           }
 
+          // 방법 3-1: allaExampleList_kor 클래스 (한글 보기 목록 - ㄱ, ㄴ, ㄷ 등)
+          const exampleKor = $td.find('.allaExampleList_kor');
+          if (exampleKor.length > 0) {
+            const korLines: string[] = [];
+            exampleKor.each((_, div) => {
+              korLines.push(this.extractTextWithUnderline($(div), $));
+            });
+            if (korLines.length > 0) {
+              exampleParts.push(korLines.join('\n'));
+            }
+          }
+
           // 방법 4: allaExampleAlign_center (중앙 정렬 텍스트, 흐름도 등)
           const exampleCenter = $td.find('.allaExampleAlign_center');
           if (exampleCenter.length > 0) {
-            const centerContent = exampleCenter.text().trim();
+            const centerContent = this.extractTextWithUnderline(
+              exampleCenter,
+              $,
+            );
             if (centerContent) {
               exampleParts.push(centerContent);
             }
@@ -513,15 +620,17 @@ export class CrawlerService {
             exampleParts.push(exampleBold.text().trim());
           }
 
-          // 방법 6: 위 형태가 모두 없으면 td 전체 텍스트
+          // 방법 6: 위 형태가 모두 없으면 td 전체 텍스트 (밑줄 보존)
           if (
             exampleP.length === 0 &&
+            exampleCircle.length === 0 &&
             exampleBleft.length === 0 &&
             exampleEng.length === 0 &&
+            exampleKor.length === 0 &&
             exampleCenter.length === 0 &&
             exampleBold.length === 0
           ) {
-            const rawText = $td.text().trim();
+            const rawText = this.extractTextWithUnderline($td, $);
             if (rawText) {
               exampleParts.push(rawText);
             }
@@ -553,10 +662,12 @@ export class CrawlerService {
 
       // 공통 보기는 별도 필드로 저장
       const sharedExample = sharedExampleMap.get(questionNumber) || null;
+      const sharedExampleImageUrls = sharedExampleImageMap.get(questionNumber) || null;
 
       const questionRow = table.find(`tr.${questionRowClass} td`);
-      const fullText = questionRow.text().trim();
-      const questionText = fullText.replace(questionNoText, '').trim();
+      const questionText = this.extractTextWithUnderline(questionRow, $)
+        .replace(questionNoText, '')
+        .trim();
 
       const questionImages: string[] = [];
       table.find('img').each((_, img) => {
@@ -582,7 +693,7 @@ export class CrawlerService {
         if (choiceNumber === 5 || choiceNumber === 0) return;
 
         const label = choiceRow.find('label');
-        const choiceText = label.text().trim();
+        const choiceText = this.extractTextWithUnderline(label, $);
 
         const choiceImages: string[] = [];
         label.find('img').each((_, img) => {
@@ -603,6 +714,7 @@ export class CrawlerService {
         questionText,
         exampleText,
         sharedExample,
+        sharedExampleImageUrls,
         questionImageUrls,
         choices,
       });
@@ -752,7 +864,7 @@ export class CrawlerService {
       );
     }
 
-    if (questions.length > 0 && answerMap.size === 0) {
+    if (!skipAnswers && questions.length > 0 && answerMap.size === 0) {
       throw new Error('정답표를 찾을 수 없습니다. HTML 구조를 확인하세요.');
     }
 
@@ -786,6 +898,23 @@ export class CrawlerService {
             }),
           );
           questionData.questionImageUrls = newUrls;
+        }
+
+        // 공통 보기 이미지 처리
+        if (
+          questionData.sharedExampleImageUrls &&
+          questionData.sharedExampleImageUrls.length > 0
+        ) {
+          const newUrls = await Promise.all(
+            questionData.sharedExampleImageUrls.map(async (url, idx) => {
+              const newUrl = await this.storageService.processAndUploadImage(
+                url,
+                `exam_${year}_sub_${subjectName}_q_${questionData.questionNumber}_shared_img${idx}`,
+              );
+              return newUrl || url;
+            }),
+          );
+          questionData.sharedExampleImageUrls = newUrls;
         }
 
         // 보기 이미지 다중 처리
@@ -865,9 +994,11 @@ export class CrawlerService {
       let savedQuestionCount = 0;
 
       for (const questionData of questions) {
-        const correctAnswers = answerMap.get(questionData.questionNumber);
+        const correctAnswers = skipAnswers
+          ? []
+          : answerMap.get(questionData.questionNumber);
 
-        if (!correctAnswers || correctAnswers.length === 0) {
+        if (!skipAnswers && (!correctAnswers || correctAnswers.length === 0)) {
           console.warn(
             `  ⚠️  문제 ${questionData.questionNumber} 정답 없음, 건너뜀`,
           );
@@ -881,8 +1012,9 @@ export class CrawlerService {
           question_text: questionData.questionText,
           example_text: questionData.exampleText,
           shared_example: questionData.sharedExample,
+          shared_example_image_urls: questionData.sharedExampleImageUrls,
           question_image_urls: questionData.questionImageUrls,
-          correct_answers: correctAnswers,
+          correct_answers: correctAnswers ?? [],
           choices: questionData.choices,
         });
         await manager.save(question);
@@ -915,6 +1047,8 @@ export class CrawlerService {
       subjectFilter?: string[]; // 특정 과목만 크롤링
       delay?: number; // 요청 간 딜레이 (ms)
       startIndex?: number; // 시작 과목 인덱스 (0부터 시작)
+      skipAnswers?: boolean; // 정답 저장 생략
+      grade?: string; // 시험 title에 학년 표시 (예: "1학년" → title: "글쓰기(1학년)")
     } = {},
   ) {
     const {
@@ -922,6 +1056,8 @@ export class CrawlerService {
       subjectFilter = [],
       delay = 1000,
       startIndex = 0,
+      skipAnswers = false,
+      grade,
     } = options;
 
     // 1단계: 과목 목록 수집
@@ -965,7 +1101,7 @@ export class CrawlerService {
             console.log(
               `  [${j + 1}/${examLinks.length}] 크롤링: ${examLinks[j]}`,
             );
-            const result = await this.crawlExam(examLinks[j], forceRetry);
+            const result = await this.crawlExam(examLinks[j], forceRetry, skipAnswers, grade);
             successCount++;
 
             // 건너뛴 문제가 있으면 로그에 기록

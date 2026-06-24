@@ -1,12 +1,12 @@
 #!/usr/bin/env python
+from __future__ import annotations
 import argparse
-import base64
 import csv
 import json
 import os
 import re
 import shutil
-import urllib.parse
+import time
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -19,14 +19,9 @@ try:
 except Exception:
     fitz = None
 
-try:
-    import pytesseract  # type: ignore
-except Exception:
-    pytesseract = None
-
 
 def ensure_api_keys_from_dotenv():
-    required_keys = ["OPENAI_API_KEY", "GEMINI_API_KEY"]
+    required_keys = ["DATALAB_API_KEY"]
     if all(os.getenv(k) for k in required_keys):
         return
     env_path = Path(".env")
@@ -54,7 +49,71 @@ OCR_CORRECTIONS: dict[str, str] = {
 }
 
 
+_IMG_TAG_RE = re.compile(r"!\[(.+?)\]\(([^)]+)\)", re.DOTALL)
+
+
+def _remove_chandra_alt_duplicates(text: str) -> str:
+    """Chandra가 ![alt](url) 뒤에 alt 텍스트를 반복 출력하는 패턴 제거.
+
+    두 가지 케이스:
+    1. 같은 줄: ![alt](url) alt_text  →  ![alt](url)
+    2. 다음 줄: ![alt](url)\n\nalt_text  →  ![alt](url)
+    """
+    # 케이스 1: 같은 줄 — ![alt](url) 뒤의 텍스트가 alt와 동일하면 제거
+    def _strip_same_line(m: re.Match) -> str:
+        full_tag = m.group(0)
+        alt = m.group(1).strip()
+        rest = m.group(3).strip() if m.group(3) else ""
+        if alt and rest and len(alt) > 20:
+            # rest가 alt의 앞부분으로 시작하면 제거
+            if rest.startswith(alt[:40]) or alt.startswith(rest[:40]):
+                return full_tag[: full_tag.index(m.group(3))]
+        return full_tag
+
+    text = re.sub(
+        r"(!\[([^\]]*)\]\([^)]+\))([ \t]+[^\n!]+)?",
+        lambda m: (
+            m.group(1)
+            if m.group(3) and m.group(2).strip() and len(m.group(2).strip()) > 20
+               and (m.group(3).strip().startswith(m.group(2).strip()[:40]) or
+                    m.group(2).strip().startswith(m.group(3).strip()[:40]))
+            else m.group(0)
+        ),
+        text,
+    )
+
+    # 케이스 2: 다음 줄 — 이미지 태그 다음 비어있는 줄 건너뛰고 alt와 동일한 줄 제거
+    lines = text.split("\n")
+    result = []
+    i = 0
+    while i < len(lines):
+        result.append(lines[i])
+        imgs_in_line = _IMG_TAG_RE.findall(lines[i])
+        if imgs_in_line:
+            j = i + 1
+            while j < len(lines):
+                stripped = lines[j].strip()
+                if not stripped:
+                    j += 1
+                    continue
+                if any(
+                    len(alt) > 20 and (
+                        stripped.startswith(alt.strip()[:40]) or
+                        alt.strip().startswith(stripped[:40])
+                    )
+                    for alt, _ in imgs_in_line
+                ):
+                    j += 1
+                else:
+                    break
+            i = j
+        else:
+            i += 1
+    return "\n".join(result)
+
+
 def apply_ocr_corrections(text: str) -> str:
+    text = _remove_chandra_alt_duplicates(text)
     for wrong, correct in OCR_CORRECTIONS.items():
         text = text.replace(wrong, correct)
     return text
@@ -66,30 +125,7 @@ QUESTION_NUMBER_PATTERNS = [
 ]
 QUESTION_SPLIT_PATTERN = re.compile(r"(?m)^\s*(\d{1,3})[.)]\s*")
 CHOICE_MARKER_PATTERN = re.compile(r"(①|②|③|④)")
-JSON_BLOCK_RE = re.compile(r"\{.*\}|\[.*\]", re.DOTALL)
 
-OCR_PROMPT = r"""이 시험지 이미지에서 모든 문항을 텍스트로 추출해줘.
-
-규칙:
-- 첫 페이지 상단의 과목명(예: "알 고 리 즘")을 찾아 띄어쓰기를 모두 제거한 후 전체 텍스트 맨 첫 줄에 "[과목명] 알고리즘" 형식으로 반드시 출력할 것.
-- 문항 번호는 "1." 또는 "1)" 형식 그대로 유지
-- 선택지 마커(① ② ③ ④)도 그대로 유지
-- [수식 규칙] 수식·공식은 LaTeX 형식으로 출력. 예: 2^{k-1}, \frac{n}{2}, O(n \log n)
-- [그림 규칙 — 가장 중요] 아래 경우는 반드시 [그림]으로만 표시하고 절대 텍스트로 설명하지 말 것:
-  · 그래프 (좌표축, 함수 곡선, 노드·간선 구조, 방향/무방향 그래프 등)
-  · 트리, 힙, 이진트리 구조
-  · 표(행렬, 인접행렬, DP 테이블, 진리표 등)
-  · 도형, 순서도, 사진, 다이어그램
-  → 이런 내용을 텍스트로 설명하는 것은 잘못된 것. 반드시 [그림] 한 단어로만 표시
-- [참조 규칙 — 매우 중요] "다음 그래프", "아래 그래프", "다음 그림", "위 그림", "다음 표", "아래 표" 등 시각 자료를 참조하는 문장 바로 다음에 실제 그래프/그림/표가 있으면, 반드시 그 자리에 [그림] 을 삽입할 것. 참조 문장만 쓰고 [그림] 생략은 절대 금지
-- [선택지 그림 규칙] 선택지 내용이 (a)(b)(c)(d) 같은 레이블이지만 실제로 그래프·그림·표를 가리키는 경우, 반드시 ① [그림] ② [그림] ③ [그림] ④ [그림] 형식으로 출력할 것
-- 선택지가 위 그림인 경우 반드시 ① [그림] ② [그림] ③ [그림] ④ [그림] 형식으로 출력할 것
-- [가장 중요] 밑줄이 쳐진 텍스트나 빈 칸(예: <u>(b)</u>, <u>ㄱ</u>)은 반드시 <u> 태그로 감쌀 것! 절대 누락하지 말 것.
-- [가장 중요] 박스(네모칸) 안에 있는 텍스트(배열, 수식, 코드, 예시 등)는 반드시 <보기> 박스내용 </보기> 와 같이 태그로 감싸서 명시할 것!
-- [코드블록 규칙] 들여쓰기된 프로그램 코드나 알고리즘 의사코드는 줄바꿈을 반드시 그대로 보존하고 ``` 와 ``` 로 감싸서 출력할 것. 절대 한 줄로 합치지 말 것.
-- · 항목(불릿 리스트)은 각 항목을 반드시 별도 줄로 출력할 것.
-- 번호가 붙은 보기(예: "1. 내용", "2. 내용" 또는 "ㄱ. 내용", "ㄴ. 내용")도 각 항목을 반드시 별도 줄로 출력할 것.
-- 그 외 불필요한 설명이나 주석 없이 출력"""
 
 
 @dataclass
@@ -113,137 +149,72 @@ def parse_question_numbers(text: str):
     return sorted(numbers)
 
 
-def post_json(url: str, payload: dict, headers: dict, timeout: int = 60):
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
 
-
-def run_ocr_if_possible(image_path: Path, provider: str, model: str | None):
-    provider = provider.lower()
-    if provider == "local":
-        return run_local_tesseract_ocr(image_path)
-    if provider == "openai":
-        return run_openai_vision_ocr_if_possible(
-            image_path, "provider=openai", model or "gpt-4.1-mini"
-        )
-    if provider == "gemini":
-        return run_gemini_vision_ocr_if_possible(
-            image_path, "provider=gemini", model or "gemini-1.5-pro"
-        )
-    if provider == "auto":
-        text, err = run_local_tesseract_ocr(image_path)
-        if text:
-            return text, None
-        text, err2 = run_openai_vision_ocr_if_possible(
-            image_path, err or "auto_local_failed", "gpt-4.1-mini"
-        )
-        if text:
-            return text, None
-        text, err3 = run_gemini_vision_ocr_if_possible(
-            image_path, err2 or "auto_openai_failed", "gemini-1.5-pro"
-        )
-        if text:
-            return text, None
-        return None, err3 or "auto_all_failed"
-    return None, f"unsupported_provider:{provider}"
-
-
-def run_local_tesseract_ocr(image_path: Path):
-    if pytesseract is None:
-        return None, "pytesseract_not_installed"
-    if shutil.which("tesseract") is None:
-        return None, "tesseract_binary_not_found"
-    try:
-        from PIL import Image
-
-        text = pytesseract.image_to_string(
-            Image.open(image_path), lang="kor+eng", config="--psm 6"
-        )
-        return text, None
-    except Exception as e:
-        return None, f"ocr_failed:{e}"
-
-
-def run_openai_vision_ocr_if_possible(image_path: Path, reason: str, model: str):
-    api_key = os.getenv("OPENAI_API_KEY")
+def run_chandra_ocr(image_path: Path, timeout: int = 180) -> tuple[str | None, str | None]:
+    api_key = os.getenv("DATALAB_API_KEY")
     if not api_key:
-        return None, f"{reason}|openai_api_key_not_found"
+        return None, "datalab_api_key_not_found"
     try:
+        import http.client
+        import ssl
+
         with open(image_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
-        payload = {
-            "model": model,
-            "input": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": OCR_PROMPT,
-                        },
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:image/png;base64,{b64}",
-                        },
-                    ],
-                }
-            ],
-        }
-        res_data = post_json(
-            "https://api.openai.com/v1/responses",
-            payload,
-            {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+            file_data = f.read()
+        ext = image_path.suffix.lower().lstrip(".")
+        mime = "image/png" if ext == "png" else f"image/{ext}"
+        boundary = "ChandraFormBoundary7MA4YWxkTrZu0gW"
+
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="output_format"\r\n\r\nmarkdown\r\n'
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{image_path.name}"\r\n'
+            f"Content-Type: {mime}\r\n\r\n"
+        ).encode() + file_data + f"\r\n--{boundary}--\r\n".encode()
+
+        ctx = ssl.create_default_context()
+        conn = http.client.HTTPSConnection("api.datalab.to", context=ctx, timeout=30)
+        conn.request(
+            "POST",
+            "/api/v1/convert",
+            body=body,
+            headers={
+                "X-Api-Key": api_key,
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+            },
         )
-        output_text = ""
-        for item in res_data.get("output", []):
-            for c in item.get("content", []):
-                if c.get("type") == "output_text":
-                    output_text += c.get("text", "")
-        if output_text.strip():
-            return output_text, None
-        return None, f"{reason}|openai_empty_output"
+        resp = conn.getresponse()
+        result = json.loads(resp.read())
+        conn.close()
+
+        if not result.get("success"):
+            return None, f"chandra_submit_failed: {result.get('error')}"
+        check_url = result.get("request_check_url")
+        if not check_url:
+            return None, "chandra_no_check_url"
+
+        # Poll for result
+        request_id = check_url.split("/")[-1]
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(3)
+            conn2 = http.client.HTTPSConnection("api.datalab.to", context=ctx, timeout=30)
+            conn2.request("GET", f"/api/v1/convert/{request_id}", headers={"X-Api-Key": api_key})
+            r2 = conn2.getresponse()
+            data = json.loads(r2.read())
+            conn2.close()
+            if data.get("status") == "complete":
+                md = (data.get("markdown") or "").strip()
+                return (md, None) if md else (None, "chandra_empty_output")
+            if data.get("status") == "error":
+                return None, f"chandra_error: {data.get('error')}"
+        return None, "chandra_timeout"
     except Exception as e:
-        return None, f"{reason}|openai_ocr_failed:{e}"
+        return None, f"chandra_ocr_failed:{e}"
 
 
-def run_gemini_vision_ocr_if_possible(image_path: Path, reason: str, model: str):
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        return None, f"{reason}|gemini_api_key_not_found"
-    try:
-        with open(image_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
-        mime = "image/jpeg" if image_path.suffix.lower() in [".jpg", ".jpeg"] else "image/png"
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": OCR_PROMPT},
-                        {"inline_data": {"mime_type": mime, "data": b64}},
-                    ]
-                }
-            ]
-        }
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{urllib.parse.quote(model)}:generateContent?key={api_key}"
-        )
-        res_data = post_json(url, payload, {"Content-Type": "application/json"})
-        output_text = ""
-        for c in res_data.get("candidates", []):
-            for p in c.get("content", {}).get("parts", []):
-                output_text += p.get("text", "")
-        if output_text.strip():
-            return output_text, None
-        return None, f"{reason}|gemini_empty_output"
-    except Exception as e:
-        return None, f"{reason}|gemini_ocr_failed:{e}"
+def run_ocr_if_possible(image_path: Path, provider: str = "chandra", model: str | None = None):
+    return run_chandra_ocr(image_path)
 
 
 _MAGIC_BYTES = {
@@ -285,162 +256,6 @@ def render_pages(pdf_path: Path, out_dir: Path, dpi: int = 150, reuse: bool = Fa
         paths.append(img_path)
     doc.close()
     return paths
-
-
-PAGE_IMAGE_MAPPING_PROMPT = """\
-이 시험지 페이지에 내장 이미지(그림/표/도형)가 총 {n_imgs}개 있습니다.
-각 이미지 번호와 페이지 기준 위치(퍼센트 left,top,right,bottom):
-{img_list}
-
-이 페이지에 있는 문항 번호: {q_numbers}
-
-각 이미지가 어느 문항에 속하며 문항 내 역할이 무엇인지 JSON으로만 답해줘.
-- question: 문항 번호 (정수)
-- position: "body"(문항 본문 그림) | "example"(보기 박스 그림) | "choice1"~"choice4"(선택지 그림)
-
-중요 규칙:
-- 각 이미지에 [왼쪽컬럼]/[오른쪽컬럼] 표시를 반드시 참고해 컬럼 구분
-- 같은 컬럼 안에서 top%가 낮을수록 앞 문항, 높을수록 뒷 문항
-- 한 문항에 이미지가 여러 개인 경우: top%가 가장 낮은(가장 위) 이미지가 body, 나머지는 top% 오름차순으로 choice1→choice2→choice3→choice4
-- top%가 거의 같은(±2%) 이미지들은 나란히 배치된 것으로 같은 문항에 속함 (예: 좌우로 놓인 두 행렬)
-- 같은 컬럼에서 수직으로 연속된 이미지들(사이 간격 15% 이내)은 같은 문항에 속할 가능성이 높음
-
-형식 (JSON만, 다른 텍스트 없음):
-{{"img1":{{"question":5,"position":"choice2"}},"img2":{{"question":6,"position":"body"}}}}"""
-
-# ── Method B: [그림] 영역 좌표 요청 → 크롭 저장 ─────────────────────────
-
-BBOX_QUESTION_BLOCK_PROMPT = """\
-이 시험지 이미지에서 {q_no}번 문항만의 영역을 JSON으로 알려줘.
-
-규칙:
-- top: "{q_no}." 또는 "{q_no})" 문항 번호가 있는 줄의 상단 %
-- bottom: {q_no}번의 마지막 선택지(④) 아래쪽 % — 반드시 {next_q_no}번 문항 번호 줄 위에서 끝낼 것
-- left/right: 해당 문항 컬럼의 좌우 경계 %
-- 다음 문항({next_q_no}번) 내용은 절대 포함하지 말 것
-
-형식 (JSON만, 다른 텍스트 없음):
-{{"left":숫자,"top":숫자,"right":숫자,"bottom":숫자}}
-
-좌표는 이미지 전체 크기 대비 퍼센트(0~100). JSON 외 출력 금지."""
-
-SPLIT_PROMPT = """\
-이 이미지는 시험 문항 하나를 확대한 것이다.
-
-아래 두 가지만 JSON으로 답해줘:
-1. 첫 번째 선택지(① 기호)가 시작되는 위치 — 이미지 높이 기준 퍼센트(0~100)
-2. 선택지 배치 방식 — "2x2" (2열 2행) 또는 "1x4" (1열 4행) 중 하나
-
-참고: 선택지가 4개라면 choices_start_y는 보통 30~70% 사이임.
-80% 이상이면 이미지에 문제 밖의 내용이 포함된 것일 수 있으니 신중히 판단할 것.
-
-형식 (JSON만, 다른 텍스트 없음):
-{{"choices_start_y":숫자,"layout":"2x2"}}"""
-
-DIRECT_MAPPING_PROMPT = """\
-이 페이지 이미지에서 {q_no}번 문항의 이미지 위치를 찾아 JSON만 출력해.
-
-규칙:
-- bbox 좌표는 페이지 기준 퍼센트(0~100): left, top, right, bottom
-- 이미지가 없으면 null
-- choice는 1~4 각각 별도로 판단
-- 다른 문항 이미지는 절대 포함하지 말 것
-
-형식:
-{{
-  "question_bbox": {{"left":0,"top":0,"right":0,"bottom":0}} | null,
-  "choices": {{
-    "1": {{"left":0,"top":0,"right":0,"bottom":0}} | null,
-    "2": {{"left":0,"top":0,"right":0,"bottom":0}} | null,
-    "3": {{"left":0,"top":0,"right":0,"bottom":0}} | null,
-    "4": {{"left":0,"top":0,"right":0,"bottom":0}} | null
-  }}
-}}
-JSON 외 텍스트 금지."""
-
-
-def run_vision_with_prompt(
-    image_path: Path, prompt: str, provider: str, model: str | None
-) -> tuple[str | None, str | None]:
-    """임의 프롬프트로 vision API 호출. 내부적으로 각 provider 재사용."""
-    provider = provider.lower()
-
-    def _openai():
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            return None, "openai_api_key_not_found"
-        try:
-            b64 = base64.b64encode(image_path.read_bytes()).decode()
-            payload = {"model": model or "gpt-4.1-mini", "input": [{"role": "user", "content": [
-                {"type": "input_text", "text": prompt},
-                {"type": "input_image", "image_url": f"data:image/png;base64,{b64}"},
-            ]}]}
-            res = post_json("https://api.openai.com/v1/responses", payload,
-                            {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"})
-            text = "".join(c.get("text", "") for item in res.get("output", [])
-                           for c in item.get("content", []) if c.get("type") == "output_text")
-            return (text, None) if text.strip() else (None, "openai_empty")
-        except Exception as e:
-            return None, f"openai_error:{e}"
-
-    def _gemini():
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            return None, "gemini_api_key_not_found"
-        try:
-            b64 = base64.b64encode(image_path.read_bytes()).decode()
-            mime = "image/jpeg" if image_path.suffix.lower() in [".jpg", ".jpeg"] else "image/png"
-            payload = {"contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": mime, "data": b64}}]}]}
-            url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-                   f"{urllib.parse.quote(model or 'gemini-1.5-pro')}:generateContent?key={api_key}")
-            res = post_json(url, payload, {"Content-Type": "application/json"})
-            text = "".join(p.get("text", "") for c in res.get("candidates", [])
-                           for p in c.get("content", {}).get("parts", []))
-            return (text, None) if text.strip() else (None, "gemini_empty")
-        except Exception as e:
-            return None, f"gemini_error:{e}"
-
-    runners = {"openai": _openai, "gemini": _gemini}
-    if provider in runners:
-        return runners[provider]()
-    if provider == "auto":
-        for fn in [_openai, _gemini]:
-            text, err = fn()
-            if text:
-                return text, None
-        return None, "auto_all_failed"
-    return None, f"unsupported:{provider}"
-
-
-def parse_bbox_response(text: str) -> dict | None:
-    if not text:
-        return None
-    cleaned = re.sub(r"```(?:json)?\s*|\s*```", "", text).strip()
-    for candidate in [cleaned, re.search(r'\{.*\}', cleaned, re.DOTALL)]:
-        try:
-            s = candidate if isinstance(candidate, str) else (candidate.group() if candidate else None)
-            if s:
-                return json.loads(s)
-        except Exception:
-            pass
-    return None
-
-
-def parse_json_loose(text: str):
-    if not text:
-        return None
-    cleaned = re.sub(r"```(?:json)?\s*|\s*```", "", text).strip()
-    try:
-        return json.loads(cleaned)
-    except Exception:
-        pass
-    m = JSON_BLOCK_RE.search(cleaned)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except Exception:
-            return None
-    return None
 
 
 def extract_images_with_bbox_from_fitz(pdf_path: Path, out_dir: Path) -> list[dict]:
@@ -499,69 +314,6 @@ def extract_images_with_bbox_from_fitz(pdf_path: Path, out_dir: Path) -> list[di
                 print(f"  [WARN] p{pidx} xref={xref} 이미지 추출 실패: {e}")
     doc.close()
     return result
-
-
-METADATA_EXTRACT_PROMPT = """\
-이 시험지 이미지 상단에서 다음 정보를 JSON으로 추출해줘.
-
-추출 항목:
-- year: 학년도 숫자 (예: 2024) — "2024학년도" → 2024
-- semester: 학기 숫자 (1 또는 2) — "하계"/"동계"이면 null
-- examType: 시험 종류 문자열 (예: "기말시험", "계절수업시험", "출석수업대체시험")
-- subjectName: 과목명 — 1번 문항 위에 표 형태로 "과목" 항목 옆에 적힌 이름 \
-(예: "알 고 리 즘" → "알고리즘"). 출제위원 바로 위 행에도 위치할 수 있음. \
-띄어쓰기를 모두 제거한 값으로 반환.
-
-형식 (JSON만, 다른 텍스트 없음):
-{"year":2024,"semester":1,"examType":"기말시험","subjectName":"알고리즘"}"""
-
-
-def extract_metadata_via_vision(
-    page_img: Path, provider: str, model: str | None
-) -> dict:
-    raw, _ = run_vision_with_prompt(page_img, METADATA_EXTRACT_PROMPT, provider, model)
-    parsed = parse_json_loose(raw or "")
-    if not isinstance(parsed, dict):
-        return {}
-    result = {}
-    if isinstance(parsed.get("year"), int):
-        result["year"] = parsed["year"]
-    elif isinstance(parsed.get("year"), str) and parsed["year"].isdigit():
-        result["year"] = int(parsed["year"])
-    sem = parsed.get("semester")
-    if isinstance(sem, int) and sem in (1, 2):
-        result["semester"] = sem
-    if isinstance(parsed.get("examType"), str):
-        result["examType"] = parsed["examType"].strip()
-    if isinstance(parsed.get("subjectName"), str):
-        result["subjectName"] = parsed["subjectName"].strip()
-    return result
-
-
-def detect_question_y_anchors(page_img: Path, question_numbers: list[int], provider: str, model: str | None) -> dict[int, float]:
-    if not question_numbers:
-        return {}
-    prompt = (
-        "이 시험지 페이지 이미지에서 다음 문항 번호들의 시작 y좌표(퍼센트)를 추정해 JSON으로만 답해줘.\n"
-        f"문항번호: {question_numbers}\n"
-        '형식: {"anchors":[{"q":1,"y":12.3},{"q":2,"y":18.7}]}\n'
-        "규칙: y는 0~100, 페이지 상단이 0, 하단이 100."
-    )
-    raw, _err = run_vision_with_prompt(page_img, prompt, provider, model)
-    parsed = parse_json_loose(raw or "")
-    out = {}
-    if isinstance(parsed, dict):
-        anchors = parsed.get("anchors", [])
-        if isinstance(anchors, list):
-            for a in anchors:
-                try:
-                    q = int(a.get("q"))
-                    y = float(a.get("y"))
-                    if 0 <= y <= 100:
-                        out[q] = y
-                except Exception:
-                    pass
-    return out
 
 
 def _nearest_question_above(
@@ -985,424 +737,6 @@ def attach_image_mappings(
     return structured_questions, mappings
 
 
-def crop_region(src: Path, bbox: dict, dst: Path) -> bool:
-    """PNG 파일에서 bbox 영역 크롭 (pymupdf 페이지 렌더링 방식)."""
-    if fitz is None or not bbox:
-        return False
-    try:
-        required = ("left", "top", "right", "bottom")
-        if any(bbox.get(k) is None for k in required):
-            return False
-        doc = fitz.open(str(src))
-        page = doc[0]
-        w, h = page.rect.width, page.rect.height
-        clip = fitz.Rect(
-            bbox["left"] / 100 * w,
-            bbox["top"] / 100 * h,
-            bbox["right"] / 100 * w,
-            bbox["bottom"] / 100 * h,
-        )
-        if clip.width <= 0 or clip.height <= 0:
-            doc.close()
-            return False
-        pix = page.get_pixmap(clip=clip, alpha=False)
-        pix.save(str(dst))
-        doc.close()
-        return True
-    except Exception as e:
-        print(f"    [crop] 실패: {e}")
-        return False
-
-
-def recover_question_images(
-    questions: list[dict],
-    page_render_paths: list[Path],
-    provider: str,
-    model: str | None,
-    out_dir: Path,
-) -> list[dict]:
-    """2-pass 방식: 1차 문항 블록 크롭 → 2차 블록 내 선택지 좌표 요청."""
-    targets = [q for q in questions if q.get("needsNonTextRecovery")]
-    if not targets:
-        return questions
-    if fitz is None:
-        print("[WARN] pymupdf 없음 — 이미지 크롭 불가")
-        return questions
-
-    crops_dir = out_dir / "crops"
-    crops_dir.mkdir(exist_ok=True)
-
-    for q in targets:
-        page_idx = q.get("page", 1) - 1
-        if page_idx >= len(page_render_paths):
-            continue
-        page_img = page_render_paths[page_idx]
-        q_no = q["questionNumber"]
-
-        # ── 1차: 문항 전체 블록 위치 ──────────────────────────────────
-        print(f"  [recover] {q_no}번 1차(블록 위치) 요청 중...")
-        raw, err = run_vision_with_prompt(
-            page_img,
-            BBOX_QUESTION_BLOCK_PROMPT.format(q_no=q_no, next_q_no=q_no + 1),
-            provider, model,
-        )
-        if not raw:
-            print(f"  [recover] {q_no}번 1차 실패: {err}")
-            continue
-
-        block_bbox = parse_bbox_response(raw)
-        if not block_bbox or any(block_bbox.get(k) is None for k in ("left", "top", "right", "bottom")):
-            print(f"  [recover] {q_no}번 블록 bbox 파싱 실패: {raw[:80]}")
-            continue
-
-        block_path = crops_dir / f"q{q_no:03d}_block.png"
-        if not crop_region(page_img, block_bbox, block_path):
-            print(f"  [recover] {q_no}번 블록 크롭 실패")
-            continue
-        print(f"  [recover] {q_no}번 블록 크롭 OK")
-
-        # ── 2차: ①시작 y%, 레이아웃만 물어보고 나머지는 알고리즘 분할 ──
-        print(f"  [recover] {q_no}번 2차(레이아웃 감지) 요청 중...")
-        raw2, err2 = run_vision_with_prompt(block_path, SPLIT_PROMPT, provider, model)
-        if not raw2:
-            print(f"  [recover] {q_no}번 2차 실패: {err2}")
-            continue
-
-        split_data = parse_bbox_response(raw2)
-        if not split_data or split_data.get("choices_start_y") is None:
-            print(f"  [recover] {q_no}번 레이아웃 파싱 실패: {raw2[:80]}")
-            continue
-
-        choices_start_y = float(split_data["choices_start_y"])
-        layout = split_data.get("layout", "2x2")
-        print(f"  [recover] {q_no}번 레이아웃={layout}, ①시작={choices_start_y:.1f}%")
-
-        # 선택지 시작이 80% 이상이면 블록이 다음 문항까지 캡처된 것으로 판단 → 재조정
-        if choices_start_y > 80:
-            print(f"  [WARN] {q_no}번 choices_start_y={choices_start_y:.1f}% — 블록이 너무 큼. 원본 페이지에서 하단 25% 제거 후 재시도...")
-            block_h = block_bbox["bottom"] - block_bbox["top"]
-            trimmed_full_bbox = {
-                "left": block_bbox["left"],
-                "top": block_bbox["top"],
-                "right": block_bbox["right"],
-                "bottom": block_bbox["top"] + block_h * 0.75,
-            }
-            block_trimmed_path = crops_dir / f"q{q_no:03d}_block_trimmed.png"
-            if crop_region(page_img, trimmed_full_bbox, block_trimmed_path):
-                block_path = block_trimmed_path
-                raw2b, err2b = run_vision_with_prompt(block_path, SPLIT_PROMPT, provider, model)
-                if raw2b:
-                    split_data2 = parse_bbox_response(raw2b)
-                    if split_data2 and split_data2.get("choices_start_y") is not None:
-                        choices_start_y = float(split_data2["choices_start_y"])
-                        layout = split_data2.get("layout", layout)
-                        print(f"  [recover] {q_no}번 재조정 후 레이아웃={layout}, ①시작={choices_start_y:.1f}%")
-
-        # 문항 본문 그림 (블록 상단 ~ ①시작 전)
-        if choices_start_y > 5:
-            dst = crops_dir / f"q{q_no:03d}_body.png"
-            if crop_region(block_path, {"left": 0, "top": 0, "right": 100, "bottom": choices_start_y}, dst):
-                q["questionImageUrls"] = [str(dst)]
-
-        # 선택지 균등 분할
-        remaining = 100 - choices_start_y
-        choice_map = {c["number"]: c for c in q.get("choices", [])}
-
-        if layout == "2x2":
-            mid_y = choices_start_y + remaining / 2
-            bboxes = [
-                {"number": 1, "left": 0,  "top": choices_start_y, "right": 50,  "bottom": mid_y},
-                {"number": 2, "left": 50, "top": choices_start_y, "right": 100, "bottom": mid_y},
-                {"number": 3, "left": 0,  "top": mid_y,           "right": 50,  "bottom": 100},
-                {"number": 4, "left": 50, "top": mid_y,           "right": 100, "bottom": 100},
-            ]
-        else:  # 1x4
-            step = remaining / 4
-            bboxes = [
-                {"number": i + 1, "left": 0, "top": choices_start_y + step * i,
-                 "right": 100, "bottom": choices_start_y + step * (i + 1)}
-                for i in range(4)
-            ]
-
-        for cb in bboxes:
-            num = cb["number"]
-            dst = crops_dir / f"q{q_no:03d}_choice{num}.png"
-            if crop_region(block_path, cb, dst):
-                if num in choice_map:
-                    choice_map[num]["imageUrls"] = str(dst)
-
-        recovered = sum(1 for c in q.get("choices", []) if c.get("imageUrls"))
-        print(f"  [recover] {q_no}번 완료 — 선택지 {recovered}개 크롭")
-
-    return questions
-
-
-FIGURE_BBOX_PROMPT = """\
-이 시험지 페이지 이미지에서 {q_no}번 문항의 그림/도형/그래프/표 위치를 JSON으로 알려줘.
-
-확인할 위치:
-- question: 문항 본문(①이 나오기 전)에 그림이 있으면 그 영역
-- example: 보기(네모 박스) 안에 그림/표가 있으면 보기 전체 박스 영역
-- choices: ①②③④ 각 선택지에 그림이 있으면 그 선택지 영역
-
-규칙:
-- 좌표는 페이지 전체 기준 퍼센트(0~100): left, top, right, bottom
-- 그림 없는 위치는 null
-- choices는 1~4 각각 독립적으로 판단
-
-형식 (JSON만, 다른 텍스트 없음):
-{{
-  "question": {{"left":0,"top":0,"right":0,"bottom":0}} | null,
-  "example": {{"left":0,"top":0,"right":0,"bottom":0}} | null,
-  "choices": {{
-    "1": {{"left":0,"top":0,"right":0,"bottom":0}} | null,
-    "2": {{"left":0,"top":0,"right":0,"bottom":0}} | null,
-    "3": {{"left":0,"top":0,"right":0,"bottom":0}} | null,
-    "4": {{"left":0,"top":0,"right":0,"bottom":0}} | null
-  }}
-}}"""
-
-
-def crop_png_region(src: Path, bbox: dict, dst: Path) -> bool:
-    """PIL로 PNG에서 bbox 퍼센트 영역 크롭."""
-    try:
-        from PIL import Image
-        required = ("left", "top", "right", "bottom")
-        if any(bbox.get(k) is None for k in required):
-            return False
-        img = Image.open(src)
-        w, h = img.size
-        left   = int(bbox["left"]   / 100 * w)
-        top    = int(bbox["top"]    / 100 * h)
-        right  = int(bbox["right"]  / 100 * w)
-        bottom = int(bbox["bottom"] / 100 * h)
-        if right <= left or bottom <= top:
-            return False
-        img.crop((left, top, right, bottom)).save(dst)
-        return True
-    except Exception as e:
-        print(f"    [crop_png] 실패: {e}")
-        return False
-
-
-def recover_missing_choice_images_by_markers(
-    pdf_path: Path,
-    questions: list[dict],
-    page_render_paths: list[Path],
-    out_dir: Path,
-) -> None:
-    """텍스트 레이어의 문항/선택지 마커 좌표로 선택지 이미지를 결정론적으로 크롭."""
-    if fitz is None:
-        return
-
-    crops_dir = out_dir / "crops"
-    crops_dir.mkdir(exist_ok=True)
-
-    by_page_q: dict[int, list[dict]] = {}
-    for q in questions:
-        by_page_q.setdefault(q.get("page", 1), []).append(q)
-
-    doc = fitz.open(str(pdf_path))
-    try:
-        for page_idx in range(1, len(doc) + 1):
-            page_qs = by_page_q.get(page_idx, [])
-            if not page_qs:
-                continue
-            page_img_idx = page_idx - 1
-            if page_img_idx >= len(page_render_paths):
-                continue
-            page_img = page_render_paths[page_img_idx]
-
-            page = doc[page_img_idx]
-            words = list(page.get_text("words"))
-            if not words:
-                continue
-            pw = page.rect.width
-            ph = page.rect.height
-
-            q_numbers = {q["questionNumber"] for q in page_qs}
-            q_anchors: dict[int, tuple[float, float]] = {}
-            for i, wi in enumerate(words):
-                x0, y0, word = wi[0], wi[1], str(wi[4]).strip()
-                m = re.match(r"^(\d{1,3})[.)]\s*$", word)
-                if m:
-                    n = int(m.group(1))
-                    if n in q_numbers and n not in q_anchors:
-                        q_anchors[n] = (x0, y0)
-                        continue
-                if re.match(r"^\d{1,3}$", word) and i + 1 < len(words):
-                    nxt = str(words[i + 1][4]).strip()
-                    if nxt in (".", ")"):
-                        n = int(word)
-                        if n in q_numbers and n not in q_anchors:
-                            q_anchors[n] = (x0, y0)
-
-            if not q_anchors:
-                continue
-
-            q_sorted = sorted(q_anchors.items(), key=lambda kv: kv[1][1])
-            q_order = [n for n, _ in q_sorted]
-            q_to_next_y = {}
-            for idx, qn in enumerate(q_order):
-                if idx + 1 < len(q_order):
-                    q_to_next_y[qn] = q_anchors[q_order[idx + 1]][1]
-                else:
-                    q_to_next_y[qn] = ph - 1
-
-            choice_markers: dict[int, dict[int, float]] = {}
-            marker_to_num = {"①": 1, "②": 2, "③": 3, "④": 4}
-            for wi in words:
-                x0, y0, word = wi[0], wi[1], str(wi[4]).strip()
-                num = marker_to_num.get(word)
-                if num is None:
-                    continue
-                qn = _nearest_question_above(y0, x0, q_anchors, pw)
-                if qn is None:
-                    continue
-                if y0 >= q_to_next_y.get(qn, ph):
-                    continue
-                choice_markers.setdefault(qn, {})
-                if num not in choice_markers[qn]:
-                    choice_markers[qn][num] = y0
-
-            for q in page_qs:
-                qn = q["questionNumber"]
-                markers = choice_markers.get(qn, {})
-                if not markers:
-                    continue
-                choice_map = {c["number"]: c for c in q.get("choices", [])}
-                col_left = 0.0 if q_anchors[qn][0] < pw / 2 else 50.0
-                col_right = 50.0 if col_left == 0.0 else 100.0
-
-                # 컬럼 여백을 조금 확보해 선택지 기호/텍스트를 덜 포함하도록 조정
-                left = col_left + 2.0
-                right = col_right - 2.0
-                q_top_pct = q_anchors[qn][1] / ph * 100
-                q_bottom_pct = q_to_next_y.get(qn, ph) / ph * 100
-
-                for num in [1, 2, 3, 4]:
-                    c = choice_map.get(num)
-                    if not c or c.get("text") != "[그림]" or c.get("imageUrls"):
-                        continue
-                    y_top = markers.get(num)
-                    if y_top is None:
-                        continue
-                    next_ys = [y for n, y in markers.items() if n > num]
-                    y_bottom = min(next_ys) if next_ys else q_to_next_y.get(qn, ph)
-
-                    top_pct = max(q_top_pct, y_top / ph * 100 - 1.0)
-                    bottom_pct = min(q_bottom_pct, y_bottom / ph * 100 - 0.5)
-                    if bottom_pct - top_pct < 2.0:
-                        continue
-
-                    dst = crops_dir / f"q{qn:03d}_choice{num}.png"
-                    ok = crop_png_region(
-                        page_img,
-                        {
-                            "left": left,
-                            "top": top_pct,
-                            "right": right,
-                            "bottom": bottom_pct,
-                        },
-                        dst,
-                    )
-                    if ok:
-                        c["imageUrls"] = [str(dst)]
-                        print(f"  [marker-crop] Q{qn} choice{num} 크롭 성공")
-    finally:
-        doc.close()
-
-
-def recover_figure_images(
-    pdf_path: Path,
-    questions: list[dict],
-    page_render_paths: list[Path],
-    provider: str,
-    model: str | None,
-    out_dir: Path,
-) -> list[dict]:
-    """[그림]이 있는 문항의 보기/선택지를 페이지 렌더에서 크롭하여 이미지로 저장."""
-    targets = [q for q in questions if q.get("needsNonTextRecovery")]
-    if not targets:
-        return questions
-
-    # 1차: 텍스트 레이어 기반 결정론적 크롭 (시험지 템플릿 의존도 낮음)
-    recover_missing_choice_images_by_markers(pdf_path, questions, page_render_paths, out_dir)
-
-    crops_dir = out_dir / "crops"
-    crops_dir.mkdir(exist_ok=True)
-
-    for q in targets:
-        page_idx = q.get("page", 1) - 1
-        if page_idx >= len(page_render_paths):
-            continue
-        page_img = page_render_paths[page_idx]
-        q_no = q["questionNumber"]
-
-        needs_question     = "[그림]" in (q.get("questionText") or "") and not (q.get("questionImageUrls"))
-        needs_example      = "[그림]" in (q.get("exampleText") or "")
-        # 이미 imageUrls가 있는 선택지는 제외
-        needs_choices      = [c for c in q.get("choices") or [] if c.get("text") == "[그림]" and not c.get("imageUrls")]
-        missing_choices    = len(q.get("choices") or []) < 4  # OCR이 선택지를 아예 못 읽은 경우
-
-        if not (needs_question or needs_example or needs_choices or missing_choices):
-            continue
-
-        print(f"  [figure] Q{q_no} bbox 요청 중...")
-        raw, err = run_vision_with_prompt(
-            page_img, FIGURE_BBOX_PROMPT.format(q_no=q_no), provider, model
-        )
-        if not raw:
-            print(f"  [figure] Q{q_no} 실패: {err}")
-            continue
-
-        data = parse_json_loose(raw)
-        if not isinstance(data, dict):
-            print(f"  [figure] Q{q_no} 파싱 실패: {raw[:60]}")
-            continue
-        print(f"  [figure] Q{q_no} bbox 반환값: {data}")
-
-        # 문항 본문 그림
-        # 문항 본문 그림
-        if needs_question and isinstance(data.get("question"), dict):
-            dst = crops_dir / f"q{q_no:03d}_body.png"
-            if crop_png_region(page_img, data["question"], dst):
-                q["questionImageUrls"] = (q.get("questionImageUrls") or []) + [str(dst)]
-
-        # 보기 그림
-        if needs_example and isinstance(data.get("example"), dict):
-            dst = crops_dir / f"q{q_no:03d}_example.png"
-            if crop_png_region(page_img, data["example"], dst):
-                q["questionImageUrls"] = (q.get("questionImageUrls") or []) + [str(dst)]
-                q["exampleText"] = None
-
-        # 선택지 그림 (기존 [그림] 선택지 + 선택지 자체가 없는 경우)
-        choices_data = data.get("choices") or {}
-        choice_map = {c["number"]: c for c in q.get("choices") or []}
-        recovered = 0
-
-        target_nums = {c["number"] for c in needs_choices}
-        if missing_choices:
-            target_nums |= {1, 2, 3, 4}
-
-        for num in sorted(target_nums):
-            # 이미 attach_image_mappings에서 매핑된 선택지는 덮어쓰지 않음
-            if num in choice_map and choice_map[num].get("imageUrls"):
-                continue
-            bbox = choices_data.get(str(num))
-            if not isinstance(bbox, dict):
-                continue
-            dst = crops_dir / f"q{q_no:03d}_choice{num}.png"
-            if crop_png_region(page_img, bbox, dst):
-                if num not in choice_map:
-                    choice_map[num] = {"number": num, "text": "[그림]", "imageUrls": None}
-                    q["choices"].append(choice_map[num])
-                choice_map[num]["imageUrls"] = [str(dst)]
-                recovered += 1
-
-        print(f"  [figure] Q{q_no} 완료 — 선택지 {recovered}/{len(target_nums)}개 크롭")
-
-    return questions
 
 
 def _html_escape(text: str) -> str:
@@ -1413,6 +747,25 @@ def _html_escape(text: str) -> str:
         .replace(">", "&gt;")
         .replace('"', "&quot;")
     )
+
+
+def _render_md_for_review(text: str, out_dir: Path) -> str:
+    """review.html용: ![alt](url) → <img>(로컬 파일) 또는 [이미지] 플레이스홀더."""
+    result = []
+    last = 0
+    for m in _IMG_TAG_RE.finditer(text):
+        result.append(_html_escape(text[last:m.start()]))
+        url = m.group(2)
+        # 로컬 파일 존재 여부 확인
+        img_path = Path(url) if Path(url).is_absolute() else out_dir / url
+        if img_path.exists():
+            rel = _rel_path(str(img_path), out_dir)
+            result.append(f'<img src="{rel}" style="max-width:100%;max-height:220px;display:block;margin:4px 0;border:1px solid #ddd;border-radius:4px;">')
+        else:
+            result.append('<span style="display:inline-block;padding:2px 8px;background:#f0f0f0;border-radius:4px;font-size:12px;color:#888">[이미지]</span>')
+        last = m.end()
+    result.append(_html_escape(text[last:]))
+    return "".join(result)
 
 
 def _rel_path(path: str | Path, out_dir: Path) -> str:
@@ -1595,6 +948,204 @@ h3{font-size:12px;color:#555;margin-bottom:6px;font-weight:600}
     preview_path = out_dir / "preview.html"
     preview_path.write_text(html, encoding="utf-8")
     return preview_path
+
+
+def generate_review_html(
+    structured_questions: list[dict],
+    out_dir: Path,
+    title: str = "Review",
+) -> Path:
+    """검수용 인터랙티브 HTML — 인라인 편집 후 JSON 다운로드 가능."""
+    import json as _json
+
+    _EMPTY_EX = '<em style="color:#aaa">없음</em>'
+    qs_json = _json.dumps(structured_questions, ensure_ascii=False, indent=2)
+
+    cards = []
+    for q in structured_questions:
+        qn = q["questionNumber"]
+        qt = _render_md_for_review(q.get("questionText") or "", out_dir)
+        ex = _render_md_for_review(q.get("exampleText") or "", out_dir)
+        se = _render_md_for_review(q.get("sharedExample") or "", out_dir)
+
+        imgs_html = ""
+        for url in (q.get("questionImageUrls") or []):
+            imgs_html += f'<img src="{_rel_path(url, out_dir)}" style="max-width:100%;max-height:200px;display:block;margin:4px 0;border:1px solid #ddd;border-radius:4px;">'
+        se_imgs_html = ""
+        for url in (q.get("sharedExampleImageUrls") or []):
+            se_imgs_html += f'<img src="{_rel_path(url, out_dir)}" style="max-width:100%;max-height:200px;display:block;margin:4px 0;">'
+
+        choices_html = ""
+        for c in (q.get("choices") or []):
+            num = c["number"]
+            mark = "①②③④"[num - 1] if 1 <= num <= 4 else str(num)
+            ct = _html_escape(c.get("text") or "")
+            c_imgs = "".join(
+                f'<img src="{_rel_path(u, out_dir)}" style="max-height:80px;display:inline-block;margin:2px;">'
+                for u in (c.get("imageUrls") or [])
+            )
+            choices_html += (
+                f'<div class="choice" data-qn="{qn}" data-cn="{num}">'
+                f'<span class="choice-mark">{mark}</span>'
+                f'<span class="editable choice-text" contenteditable="true" data-field="choiceText" data-qn="{qn}" data-cn="{num}">{ct}</span>'
+                f'{c_imgs}'
+                f'</div>'
+            )
+
+        warn = q.get("needsNonTextRecovery")
+        warn_badge = '<span class="badge warn">검수필요</span>' if warn else '<span class="badge ok">OK</span>'
+
+        shared_section = ""
+        if se or se_imgs_html:
+            shared_section = (
+                f'<div class="section-label">공통보기</div>'
+                f'<div class="field shared-box">{se}{se_imgs_html}</div>'
+            )
+
+        ex_imgs_html = "".join(
+            f'<img src="{_rel_path(u, out_dir)}" style="max-width:100%;max-height:220px;display:block;margin:4px 0;border:1px solid #ddd;border-radius:4px;">'
+            for u in (q.get("exampleImageUrls") or [])
+        )
+        ex_section = (
+            f'<div class="section-label">보기 <button class="btn-small" onclick="clearExample({qn})">지우기</button></div>'
+            f'<div class="editable field ex-box" contenteditable="true" data-field="exampleText" data-qn="{qn}">{ex or _EMPTY_EX}</div>'
+            f'{ex_imgs_html}'
+        )
+
+        cards.append(
+            f'<div class="card" id="q{qn}">'
+            f'<div class="card-header">'
+            f'  <span class="qnum">Q{qn}</span>{warn_badge}'
+            f'  <button class="btn-small" style="margin-left:auto" onclick="splitExample({qn})">선택→보기</button>'
+            f'</div>'
+            f'{shared_section}'
+            f'<div class="section-label">문제</div>'
+            f'<div class="editable field" contenteditable="true" data-field="questionText" data-qn="{qn}">{qt}</div>'
+            f'{imgs_html}'
+            f'{ex_section}'
+            f'<div class="section-label">선택지</div>'
+            f'{choices_html}'
+            f'</div>'
+        )
+
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>검수 — {_html_escape(title)}</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: 'Apple SD Gothic Neo', sans-serif; font-size: 14px; background: #f5f5f5; color: #222; }}
+  .toolbar {{ position: sticky; top: 0; z-index: 100; background: #2c3e50; color: #fff; padding: 10px 16px; display: flex; align-items: center; gap: 10px; }}
+  .toolbar h1 {{ font-size: 15px; font-weight: 600; flex: 1; }}
+  .toolbar button {{ background: #27ae60; color: #fff; border: none; padding: 7px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }}
+  .toolbar button:hover {{ background: #1e8449; }}
+  .container {{ max-width: 820px; margin: 0 auto; padding: 16px; }}
+  .card {{ background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.12); margin-bottom: 14px; overflow: hidden; }}
+  .card-header {{ display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: #f8f9fa; border-bottom: 1px solid #e9ecef; }}
+  .qnum {{ font-weight: 700; font-size: 15px; color: #2c3e50; }}
+  .badge {{ font-size: 11px; padding: 2px 7px; border-radius: 10px; font-weight: 600; }}
+  .badge.ok {{ background: #d4edda; color: #155724; }}
+  .badge.warn {{ background: #fff3cd; color: #856404; }}
+  .section-label {{ font-size: 11px; font-weight: 600; color: #888; padding: 6px 14px 2px; text-transform: uppercase; letter-spacing: .5px; }}
+  .field {{ padding: 8px 14px; min-height: 32px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }}
+  .editable {{ outline: none; border-radius: 4px; transition: background .15s; }}
+  .editable:focus {{ background: #fffbe6; box-shadow: inset 0 0 0 2px #f39c12; }}
+  .ex-box {{ background: #fef9e7; border-left: 3px solid #f39c12; font-family: monospace; font-size: 13px; }}
+  .shared-box {{ background: #eaf4fb; border-left: 3px solid #3498db; font-size: 13px; }}
+  .choice {{ display: flex; align-items: flex-start; gap: 8px; padding: 5px 14px; border-top: 1px solid #f0f0f0; }}
+  .choice-mark {{ font-weight: 700; color: #3498db; min-width: 18px; margin-top: 2px; }}
+  .choice-text {{ flex: 1; }}
+  .btn-small {{ font-size: 11px; padding: 2px 8px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; background: #fff; color: #555; }}
+  .btn-small:hover {{ background: #f0f0f0; }}
+  .modified {{ background: #fffbe6 !important; }}
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <h1>검수 — {_html_escape(title)}</h1>
+  <span id="change-count" style="font-size:12px;opacity:.8"></span>
+  <button onclick="saveJSON()">💾 JSON 저장</button>
+</div>
+<div class="container">
+{"".join(cards)}
+</div>
+<script>
+const DATA = {qs_json};
+const changes = {{}};
+
+function qIdx(qn) {{ return DATA.findIndex(q => q.questionNumber === qn); }}
+
+document.querySelectorAll('.editable').forEach(el => {{
+  el.addEventListener('input', () => {{
+    const qn = +el.dataset.qn;
+    const field = el.dataset.field;
+    const cn = el.dataset.cn ? +el.dataset.cn : null;
+    const text = el.innerText.trim();
+    const idx = qIdx(qn);
+    if (idx === -1) return;
+    if (field === 'questionText') {{ DATA[idx].questionText = text; }}
+    else if (field === 'exampleText') {{ DATA[idx].exampleText = text || null; }}
+    else if (field === 'choiceText' && cn) {{
+      const c = DATA[idx].choices.find(c => c.number === cn);
+      if (c) c.text = text;
+    }}
+    el.closest('.card').classList.add('modified');
+    changes[qn] = true;
+    document.getElementById('change-count').textContent = `수정 ${{Object.keys(changes).length}}건`;
+  }});
+}});
+
+function clearExample(qn) {{
+  const idx = qIdx(qn);
+  if (idx === -1) return;
+  DATA[idx].exampleText = null;
+  const el = document.querySelector(`[data-field="exampleText"][data-qn="${{qn}}"]`);
+  if (el) el.innerHTML = '<em style="color:#aaa">없음</em>';
+  changes[qn] = true;
+  document.getElementById('change-count').textContent = `수정 ${{Object.keys(changes).length}}건`;
+}}
+
+function splitExample(qn) {{
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) {{ alert('문제 텍스트에서 보기로 옮길 부분을 드래그로 선택하세요.'); return; }}
+  const qtEl = document.querySelector(`[data-field="questionText"][data-qn="${{qn}}"]`);
+  if (!qtEl || !qtEl.contains(sel.anchorNode)) {{ alert('문제 텍스트 안에서 선택해주세요.'); return; }}
+  const selected = sel.toString().trim();
+  if (!selected) return;
+  const idx = qIdx(qn);
+  const qt = DATA[idx].questionText || '';
+  const splitPos = qt.indexOf(selected);
+  if (splitPos === -1) {{ alert('선택한 텍스트를 찾을 수 없습니다.'); return; }}
+  const newQt = qt.slice(0, splitPos).trimEnd();
+  const newEx = qt.slice(splitPos).trim();
+  DATA[idx].questionText = newQt;
+  DATA[idx].exampleText = (DATA[idx].exampleText ? DATA[idx].exampleText + '\\n' : '') + newEx;
+  qtEl.innerText = newQt;
+  const exEl = document.querySelector(`[data-field="exampleText"][data-qn="${{qn}}"]`);
+  if (exEl) exEl.innerText = DATA[idx].exampleText;
+  sel.removeAllRanges();
+  changes[qn] = true;
+  document.getElementById('change-count').textContent = `수정 ${{Object.keys(changes).length}}건`;
+}}
+
+function saveJSON() {{
+  const blob = new Blob([JSON.stringify(DATA, null, 2)], {{type: 'application/json'}});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'structured-questions.json';
+  a.click();
+  document.querySelectorAll('.card.modified').forEach(c => c.classList.remove('modified'));
+  changes[Symbol()] = null;  // reset display
+  document.getElementById('change-count').textContent = '저장됨';
+}}
+</script>
+</body>
+</html>"""
+
+    review_path = out_dir / "review.html"
+    review_path.write_text(html, encoding="utf-8")
+    return review_path
 
 
 def _render_choice(choice: dict, out_dir: Path) -> str:
@@ -2055,14 +1606,61 @@ def split_question_blocks(text: str):
     return blocks
 
 
+_BOGI_LABEL_RE = re.compile(r"^[\(\[\*]*보기[\)\]\*]*$")
+
+
+def _extract_bullet_example(stem: str) -> tuple[str, str | None]:
+    """stem에서 non-choice 불릿 리스트 블록을 보기(exampleText)로 분리.
+
+    순방향 탐색: 첫 번째 "- 내용" 줄(①②③④ 제외)을 찾아 그 위치부터 끝까지를
+    exampleText로 분리. 단, 그 앞에 실제 문제 본문이 있어야 한다.
+    첫 불릿 바로 앞 줄이 "보기" 라벨이면 그 줄도 exampleText에 포함한다.
+    """
+    lines = stem.split("\n")
+    bullet_start = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if (
+            re.match(r"^- (?![①②③④]).+", stripped)
+            or stripped.startswith("```")
+            or (stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 2)
+            or stripped.startswith("![")
+        ):
+            bullet_start = i
+            break
+    if bullet_start is None or bullet_start == 0:
+        return stem, None
+
+    # 첫 불릿/코드블록 앞의 빈 줄을 건너뛰고 "보기" 라벨이 있으면 포함
+    split_at = bullet_start
+    for j in range(bullet_start - 1, -1, -1):
+        stripped = lines[j].strip()
+        if not stripped:
+            continue
+        if _BOGI_LABEL_RE.match(stripped):
+            split_at = j
+        break
+
+    question_part = "\n".join(lines[:split_at]).rstrip()
+    if not question_part.strip():
+        return stem, None
+
+    example_lines = lines[split_at:]
+    while example_lines and example_lines[-1].strip() in ("", "-"):
+        example_lines.pop()
+    example_part = "\n".join(example_lines).strip()
+    return question_part, example_part or None
+
+
 def parse_choices_from_block(block: str):
-    # <보기>...</보기> 안의 내용은 같은 길이의 공백으로 마스킹하여 선택지 마커 오인식 방지
+    # <보기>...</보기> 및 ![alt](url) 안의 내용은 같은 길이의 공백으로 마스킹하여 선택지 마커 오인식 방지
     masked = re.sub(
         r"<보기>.*?</보기>",
         lambda m: " " * len(m.group()),
         block,
         flags=re.DOTALL,
     )
+    masked = _IMG_TAG_RE.sub(lambda m: " " * len(m.group()), masked)
     ms = list(CHOICE_MARKER_PATTERN.finditer(masked))
     if not ms:
         return [], block
@@ -2076,6 +1674,8 @@ def parse_choices_from_block(block: str):
         n_map = {"①": 1, "②": 2, "③": 3, "④": 4}
         num = n_map.get(marker, int(marker[0]) if marker and marker[0].isdecimal() else 0)
         text = normalize_ws(block[start:end])  # 원본 block 기준 텍스트 추출
+        # "- ②" 포맷에서 잘린 " -" 잔여분 제거
+        text = re.sub(r'\s*-\s*$', '', text).strip()
         # OCR이 선택지 텍스트 끝에 [그림]을 잘못 붙인 경우 제거
         if text.endswith("[그림]") and text != "[그림]":
             text = text[: -len("[그림]")].rstrip()
@@ -2126,16 +1726,28 @@ def parse_structured_questions(page_ocr_texts: list[str]):
             if "※" in preamble:
                 note_start = preamble.find("※")
                 note_text = normalize_ws(preamble[note_start:])
-                if note_text:
+                r = _parse_shared_range(note_text)
+                # 공통보기 ※는 "물음에 답" 같은 구문을 포함함
+                # 시험지 헤더 ※("정답 하나만을 골라...")는 공통보기 아님
+                _SHARED_KEYWORDS = ("물음에 답", "다음을 보고", "아래를 보고", "다음 그림", "아래 그림")
+                is_shared = r and any(kw in note_text for kw in _SHARED_KEYWORDS)
+                if note_text and is_shared:
                     pending_shared = note_text
-                    r = _parse_shared_range(note_text)
-                    pending_shared_from  = r[0] if r else 1
-                    pending_shared_until = r[1] if r else 9999
+                    pending_shared_from  = r[0]
+                    pending_shared_until = r[1]
 
         raw_blocks = split_question_blocks(page_text)
         for qn, block, shared_note in raw_blocks:
             choices, stem = parse_choices_from_block(block)
             example_text = None
+
+            # Chandra markdown 보기 패턴:
+            # stem 끝에 "- 항목" 불릿 리스트 블록이 있으면 exampleText로 분리.
+            # 선택지 마커(①②③④)로 시작하는 줄은 제외.
+            stem, bullet_example = _extract_bullet_example(stem)
+            if bullet_example:
+                example_text = normalize_ws(bullet_example)
+
             question_text = normalize_ws(stem)
 
             # "보기"가 있으면 문제/보기 분리
@@ -2147,11 +1759,6 @@ def parse_structured_questions(page_ocr_texts: list[str]):
                     view_idx = idx
                     break
             if view_idx == -1:
-                # 태그 없는 날보기: 조사(의/에/를/은/는/로/가) 없이 단독으로 쓰인 경우만
-                m = re.search(r'(?<![^\s가-힣])보기(?![의에를은는로가도])', question_text)
-                if m:
-                    view_idx = m.start()
-            if view_idx == -1:
                 # <u> 태그로 감싸진 긴 블록(50자 이상)이 있고 앞에 문제 본문이 있으면 보기로 분리
                 u_block_m = re.search(r'<u>.{50,}?</u>', question_text, re.DOTALL)
                 if u_block_m and question_text[:u_block_m.start()].strip():
@@ -2160,6 +1767,8 @@ def parse_structured_questions(page_ocr_texts: list[str]):
                 example_text = convert_pipe_tables_to_markdown(normalize_ws(question_text[view_idx:]))
                 question_text = normalize_ws(question_text[:view_idx])
             question_text = convert_pipe_tables_to_markdown(question_text)
+            # "- ①" 절단 잔여 " -" 제거
+            question_text = re.sub(r'\s*-\s*$', '', question_text)
 
             record = {
                 "questionNumber": qn,
@@ -2228,10 +1837,12 @@ def parse_structured_questions(page_ocr_texts: list[str]):
 
             # 이 블록 말미의 ※ → 다음 문항부터 적용 (새 ※가 나오면 교체)
             if shared_note is not None:
-                pending_shared = shared_note
                 r = _parse_shared_range(shared_note)
-                pending_shared_from  = r[0] if r else 1
-                pending_shared_until = r[1] if r else 9999
+                _SHARED_KEYWORDS = ("물음에 답", "다음을 보고", "아래를 보고", "다음 그림", "아래 그림")
+                if r and any(kw in shared_note for kw in _SHARED_KEYWORDS):
+                    pending_shared = shared_note
+                    pending_shared_from  = r[0]
+                    pending_shared_until = r[1]
 
     return [by_qn[k] for k in sorted(by_qn.keys())]
 
@@ -2240,12 +1851,12 @@ def analyze_pdf(
     pdf_path: Path,
     out_dir: Path,
     text_threshold: int,
-    ocr_provider: str,
-    ocr_model: str | None,
-    dpi: int,
+    ocr_model: str | None = None,
+    dpi: int = 150,
     reuse_pages: bool = False,
     answer_map: dict[int, list[int]] | None = None,
 ):
+    ocr_provider = "chandra"
     out_dir.mkdir(parents=True, exist_ok=True)
     print("[..] 페이지 렌더링 중 (pymupdf)...")
     page_render_paths = render_pages(pdf_path, out_dir, dpi, reuse=reuse_pages)
@@ -2309,6 +1920,8 @@ def analyze_pdf(
         ocr_texts_per_page.append(ocr_text)
         status = "OK" if ocr_text else "SKIP"
         print(f"  page {page_num}/{len(page_summaries)} OCR {status}")
+        if ocr_text:
+            (out_dir / f"page_{page_num:02d}_ocr.md").write_text(ocr_text, encoding="utf-8")
 
     text_layer = "\n".join(text_layer_all)
     ocr_layer = "\n".join(all_ocr_texts)
@@ -2323,14 +1936,8 @@ def analyze_pdf(
     blockers = []
     if scanned_like and not all_ocr_texts:
         blockers.append("텍스트 레이어가 거의 없어 OCR이 필요하지만, 현재 OCR 결과가 없습니다.")
-    if scanned_like and shutil.which("tesseract") is None:
-        if (
-            not os.getenv("OPENAI_API_KEY")
-            and not os.getenv("GEMINI_API_KEY")
-        ):
-            blockers.append(
-                "tesseract, OPENAI_API_KEY, GEMINI_API_KEY가 모두 없어 OCR을 수행할 수 없습니다."
-            )
+    if scanned_like and not os.getenv("DATALAB_API_KEY"):
+        blockers.append("DATALAB_API_KEY가 없어 Chandra OCR을 수행할 수 없습니다.")
 
     report = {
         "generated_at": datetime.now().isoformat(),
@@ -2345,9 +1952,7 @@ def analyze_pdf(
         "ocr_question_numbers": ocr_question_numbers,
         "image_count_total": len(extracted_images),
         "extracted_images": extracted_images,
-        "ocr_enabled": (pytesseract is not None and shutil.which("tesseract") is not None)
-        or bool(os.getenv("OPENAI_API_KEY"))
-        or bool(os.getenv("GEMINI_API_KEY")),
+        "ocr_enabled": bool(os.getenv("DATALAB_API_KEY")),
         "ocr_provider": ocr_provider,
         "ocr_model": ocr_model,
         "ocr_error_samples": ocr_errors[:20],
@@ -2359,13 +1964,7 @@ def analyze_pdf(
         ],
     }
 
-    # 메타데이터 추출: 첫 페이지 렌더링 이미지로 vision API 호출 (연도/학기/시험종류/과목명)
     metadata = {"year": None, "semester": None, "examType": None, "subjectName": None}
-    if page_render_paths:
-        print("[..] 첫 페이지에서 메타데이터 추출 중...")
-        vision_meta = extract_metadata_via_vision(page_render_paths[0], ocr_provider, ocr_model)
-        metadata.update({k: v for k, v in vision_meta.items() if v is not None})
-        print(f"[OK] 메타데이터: {metadata}")
 
     # OCR 텍스트에서 누락된 항목 보완 (정규식 fallback)
     if ocr_texts_per_page:
@@ -2406,6 +2005,12 @@ def analyze_pdf(
         pdf_path, structured_questions, extracted_images
     )
     report["image_mappings"] = image_mappings
+
+    # exampleText에 이미지가 있는 문항은 questionImageUrls → exampleImageUrls로 이동
+    for q in structured_questions:
+        if q.get("exampleText") and "![" in q["exampleText"] and q.get("questionImageUrls"):
+            q["exampleImageUrls"] = q.pop("questionImageUrls")
+            q["questionImageUrls"] = None
 
     report["structured_question_count"] = len(structured_questions)
     report["choice_count_anomalies"] = [
@@ -2449,11 +2054,18 @@ def analyze_pdf(
         title=pdf_path.stem,
     )
 
+    review_path = generate_review_html(
+        structured_questions,
+        out_dir,
+        title=pdf_path.stem,
+    )
+
     print(f"\n[OK] report.json : {report_path}")
     print(f"[OK] image-mapping : {image_mapping_path}")
     print(f"[OK] structured : {structured_path}")
     print(f"[OK] report.html : {html_path}")
     print(f"[OK] preview.html : {preview_path}")
+    print(f"[OK] review.html  : {review_path}")
     print(f"[OK] pages={report['page_count']} text_chars={total_text_chars} embedded_images={len(extracted_images)}")
     if blockers:
         print("\n[WARN] blockers:")
@@ -2474,12 +2086,7 @@ def main():
         default=100,
         help="평균 chars/page 이하면 scanned-like 판정 (기본값 100)",
     )
-    parser.add_argument(
-        "--ocr-provider",
-        default="auto",
-        choices=["auto", "local", "openai", "gemini"],
-    )
-    parser.add_argument("--ocr-model", default=None, help="OCR 모델 이름 override")
+    parser.add_argument("--ocr-model", default=None, help="(미사용, 호환성 유지)")
     parser.add_argument(
         "--dpi",
         type=int,
@@ -2592,7 +2199,7 @@ def main():
         return
 
     analyze_pdf(
-        pdf_path, out_dir, args.text_threshold, args.ocr_provider, args.ocr_model,
+        pdf_path, out_dir, args.text_threshold, args.ocr_model,
         args.dpi, args.reuse_pages, answer_map=answer_map or None,
     )
 
