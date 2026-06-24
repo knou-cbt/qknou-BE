@@ -31,7 +31,8 @@ export class StorageService {
         timeout: 5000,
       });
       const buffer = Buffer.from(response.data, 'binary');
-      const contentType = response.headers['content-type'] || 'image/jpeg';
+      const rawContentType = response.headers['content-type'];
+      const contentType = (typeof rawContentType === 'string' ? rawContentType : Array.isArray(rawContentType) ? rawContentType[0] : 'image/jpeg') || 'image/jpeg';
 
       const extMatch = contentType.match(/\/(.*?)$/);
       const ext = extMatch ? extMatch[1] : 'jpg';
