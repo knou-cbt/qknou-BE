@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { FeedbackType } from '../entities/feedback.entity';
 
 const FEEDBACK_TYPES: FeedbackType[] = [
@@ -19,11 +26,12 @@ export class CreateFeedbackDto {
   type: FeedbackType;
 
   @ApiProperty({
-    description: '피드백 내용',
+    description: '피드백 내용 (최대 5000자)',
     example: '3번 선택지 정답 표기가 이상해요',
   })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(5000)
   content: string;
 
   @ApiProperty({
@@ -36,11 +44,12 @@ export class CreateFeedbackDto {
   questionId?: number;
 
   @ApiProperty({
-    description: '제보 시점 페이지 URL',
+    description: '제보 시점 페이지 URL (최대 2000자)',
     required: false,
     example: 'https://qknou.kr/exams/1',
   })
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
   pageUrl?: string;
 }

@@ -67,10 +67,15 @@ export class NoticesController {
   @ApiResponse({ status: 201, description: '발행 성공' })
   @ApiResponse({
     status: 400,
-    description: 'entryIds가 존재하지 않거나 이미 다른 공지에 묶인 내역 포함',
+    description: '존재하지 않는 entryIds 포함',
   })
   @ApiResponse({ status: 401, description: '인증 실패' })
   @ApiResponse({ status: 403, description: '관리자 권한 없음' })
+  @ApiResponse({
+    status: 409,
+    description:
+      '동시에 다른 관리자가 발행해서 entryIds 중 일부가 이미 다른 공지에 묶임 (다시 조회 후 재시도 필요)',
+  })
   async publish(@Body() dto: PublishNoticeDto) {
     const data = await this.noticesService.publish(
       dto.title,

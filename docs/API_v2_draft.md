@@ -3,7 +3,7 @@
 이 문서는 [API.md](./API.md)(1~20번, 기존 운영 API)에 이어지는 **v2 신규/변경 API 초안**입니다.
 확정 전까지는 이 파일에서 관리하고, 프론트 협의가 끝나면 `API.md`에 병합합니다.
 
-> ⚠️ **구현 상태 주의**: 아래 "상태"가 "설계만"인 항목(22~28, 36)은 아직 백엔드 코드가 없어서 **호출하면 404가 납니다**. 나머지("구현 완료")는 실제로 붙여서 연동 테스트해도 됩니다.
+> ⚠️ **구현 상태 주의**: 아래 "상태"가 "설계만"인 항목(22~28)은 아직 백엔드 코드가 없어서 **호출하면 404가 납니다**. 나머지("구현 완료")는 실제로 붙여서 연동 테스트해도 됩니다.
 
 **목차**
 
@@ -45,9 +45,9 @@
 | key | 설명 | value 타입 | 옵션 | Nullable | 예시 |
 | --- | --- | --- | --- | --- | --- |
 | type | 피드백 유형 | string ("question_bug" \| "site_bug" \| "suggestion" \| "other") | - | N | "question_bug" |
-| content | 피드백 내용 | string | - | N | "3번 선택지 정답 표기가 이상해요" |
+| content | 피드백 내용 (최대 5000자) | string | - | N | "3번 선택지 정답 표기가 이상해요" |
 | questionId | 문항 ID (문항 관련 제보일 때) | number | optional | Y | 101 |
-| pageUrl | 제보 시점 페이지 URL | string | optional | Y | "https://qknou.kr/exams/1" |
+| pageUrl | 제보 시점 페이지 URL (최대 2000자) | string | optional | Y | "https://qknou.kr/exams/1" |
 
 **type → GitHub 라벨 매핑**
 
@@ -60,6 +60,8 @@
 
 > ⚠️ 라벨은 레포에 미리 수동으로 생성해둬야 합니다 (없는 라벨을 issue 생성 API에 넘기면 422 에러).
 
+**개인정보 처리 방침**: GitHub Issue 본문/댓글에는 사용자 **이메일을 넣지 않고 내부 `userId`(UUID)만** 표시합니다. 실제 신원 확인이 필요하면 관리자가 DB에서 `userId`로 조회합니다 (private 레포라도 PII를 외부 서비스에 그대로 보관하지 않기 위함). 또한 사용자가 작성한 `content` 원문은 GitHub 마크다운/멘션(`@누군가`)이 그대로 해석되지 않도록 코드 블록으로 감싸서 전송합니다.
+
 **동일 문항 중복 제보 처리**
 
 `type=question_bug`이고 `questionId`가 있는 경우, 같은 문항에 대해 여러 사용자가 각자 이슈를 새로 만들지 않도록 아래 순서로 처리합니다.
@@ -67,16 +69,21 @@
 1. 같은 `questionId`로 저장된 가장 최근 `feedbacks` row에 연결된 `github_issue_number`가 있는지 조회
 2. 있으면 GitHub API로 해당 이슈가 아직 **open** 상태인지 확인
 3. open이면 → 새 이슈를 만들지 않고 **기존 이슈에 댓글만 추가**, 이번 제보의 `feedbacks` row는 그 기존 `github_issue_number`를 그대로 참조
-   - 댓글에는 반드시 이번 제보자가 작성한 **원문 content를 그대로** 포함해야 합니다. 같은 문항이어도 신고자마다 지적하는 내용이나 의견(예: 정답이 2번이라는 사람 vs 4번이라는 사람)이 다를 수 있으므로, "추가 제보가 있습니다" 같은 요약/알림성 댓글로 뭉개면 안 됩니다.
+   - 댓글에는 반드시 이번 제보자가 작성한 **원문 content를 그대로**(코드 블록으로 감싸서) 포함해야 합니다. 같은 문항이어도 신고자마다 지적하는 내용이나 의견(예: 정답이 2번이라는 사람 vs 4번이라는 사람)이 다를 수 있으므로, "추가 제보가 있습니다" 같은 요약/알림성 댓글로 뭉개면 안 됩니다.
    - 댓글 포맷 예시:
      ```
      **추가 제보** (2026-09-05 10:32)
-     - 제보자: {user.email}
-     - 내용: {content}
+     - 제보자 ID: {userId}
+     - 내용:
+     ```
+     {content}
+     ```
      - 페이지: {pageUrl}
      ```
 4. closed거나 기존 이슈가 없으면 → 새 이슈 생성
 5. 2번의 GitHub API 조회 자체가 실패하면(네트워크 오류 등) → 안전하게 "기존 이슈 없음"으로 간주하고 새 이슈 생성 (제보 자체가 실패하면 안 됨)
+
+> ⚠️ **알려진 한계**: 같은 문항에 대한 두 제보가 완전히 동시에 들어오면(수 밀리초 이내) 위 1~2번 조회가 서로를 못 보고 이슈가 중복 생성될 수 있습니다. 외부 HTTP 호출(GitHub API)을 DB 트랜잭션 안에 넣기 어려워서 완전히 막지는 않았고, 빈도가 낮고 피해도 "이슈 하나 중복 생성" 정도라 지금은 감수합니다.
 
 **Response**
 
@@ -85,29 +92,31 @@
 | success | 성공 여부 | boolean | - | N |
 | data.id | 피드백 ID | number | - | N |
 | data.type | 피드백 유형 | string | - | N |
-| data.githubIssueUrl | 연결된 GitHub Issue URL (신규 생성이든 기존 이슈 재사용이든 항상 채워짐, GitHub 연동 자체가 실패한 경우만 null) | string | optional | Y |
-| data.isNewIssue | 새로 이슈를 생성했는지(true) / 기존 이슈에 댓글로 합쳐졌는지(false) | boolean | - | N |
+| data.githubIssueUrl | 연결된 GitHub Issue URL. `integrationStatus`가 'failed'면 null | string | optional | Y |
+| data.integrationStatus | GitHub 연동 결과: "created"(새 이슈 생성) \| "merged"(기존 이슈에 댓글로 병합) \| "failed"(GitHub 연동 실패, 접수는 성공했지만 이슈 없음) | string | - | N |
 | data.createdAt | 생성일 | string (ISO 8601) | - | N |
 
 **Example**
 
+Request:
 ```json
-// Request
 {
   "type": "question_bug",
   "content": "3번 선택지 정답 표기가 이상해요",
   "questionId": 101,
   "pageUrl": "https://qknou.kr/exams/1"
 }
+```
 
-// Response
+Response:
+```json
 {
   "success": true,
   "data": {
     "id": 12,
     "type": "question_bug",
     "githubIssueUrl": "https://github.com/{org}/qknou-feedback/issues/45",
-    "isNewIssue": true,
+    "integrationStatus": "created",
     "createdAt": "2026-09-05T10:00:00+09:00"
   }
 }
@@ -118,7 +127,7 @@
 | status | response content |
 | --- | --- |
 | 201 | 접수 성공 |
-| 400 | 잘못된 요청 (type 값 오류, content 누락 등) |
+| 400 | 잘못된 요청 (type 값 오류, content 5000자 초과 등) |
 | 401 | 인증 실패 (로그인 필요) |
 | 404 | questionId에 해당하는 문항을 찾을 수 없음 |
 
@@ -467,14 +476,17 @@
 | data.publishedAt | 발행일 | string | - | N |
 | data.exposeEndAt | 노출 종료일 (발행일+7일) | string | - | N |
 
+**동시성**: entryIds를 "notice_id가 비어있는 것만" 조건으로 트랜잭션 안에서 원자적으로 UPDATE합니다. 관리자 두 명이 겹치는 entryIds로 동시에 발행을 시도하면 먼저 커밋된 쪽만 성공하고, 나중 쪽은 409로 실패합니다(공지도 함께 롤백되어 빈 공지가 남지 않음).
+
 **Status**
 
 | status | response content |
 | --- | --- |
 | 201 | 발행 성공 |
-| 400 | entryIds가 비어있거나 이미 다른 공지에 묶인 내역 포함 |
+| 400 | 존재하지 않는 entryIds 포함 |
 | 401 | 인증 실패 |
 | 403 | 관리자 권한 없음 |
+| 409 | 동시에 다른 관리자가 발행해서 entryIds 중 일부가 이미 다른 공지에 묶임 (다시 조회 후 재시도) |
 
 ---
 
@@ -519,7 +531,9 @@
 
 **⚠️ 기존 API 변경 사항 (#11 시험 제출)**
 
-`POST /api/exams/:id/submit`은 그대로 두되, `Authorization` 헤더가 있으면 채점 후 결과를 위 기록으로 저장(있으면 덮어쓰기)하도록 동작을 추가합니다. 헤더가 없으면 기존과 동일하게 저장 없이 채점 결과만 반환(비로그인 이용 유지).
+`POST /api/exams/:id/submit`은 그대로 두되, `Authorization` 헤더가 있으면 채점 후 결과를 위 기록으로 저장(있으면 덮어쓰기)하도록 동작을 추가합니다. 헤더가 없으면 기존과 동일하게 저장 없이 채점 결과만 반환(비로그인 이용 유지). 헤더가 있는데 토큰이 유효하지 않으면(만료/위조) 401을 반환합니다(무효 토큰을 비로그인으로 조용히 처리하지 않음).
+
+**동시성**: 동일 사용자가 같은 시험을 짧은 간격으로 두 번 제출해도(중복 클릭/재시도) 서로의 delete→insert가 꼬이지 않도록, 저장 트랜잭션 안에서 `user_id` 기준 Postgres advisory lock으로 직렬화합니다. "최근"의 기준은 이 저장 트랜잭션이 커밋 완료된 순서입니다(요청이 서버에 도착한 순서가 아님).
 
 ---
 
@@ -635,6 +649,7 @@
 | status | response content |
 | --- | --- |
 | 200 | 조회 성공 |
+| 401 | Authorization 헤더는 있으나 토큰이 유효하지 않음(만료/위조). 헤더 자체가 없으면 401 없이 비로그인으로 처리됨 |
 | 404 | 문항을 찾을 수 없음 |
 
 > ⚠️ 암기모드 특성상 정답/해설을 항상 포함하는 걸로 가정했습니다 (study 모드와 동일). 공유 링크로 들어온 사람에게도 정답까지 보여줄지는 확인 필요합니다.

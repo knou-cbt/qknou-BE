@@ -41,6 +41,13 @@ export class ExamHistoryService {
     result: SubmitResultForHistory,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
+      // 같은 사용자가 동시에 두 번 제출해도(중복 클릭/재시도) delete→insert가
+      // 서로 겹치지 않도록 트랜잭션 범위의 advisory lock으로 직렬화한다.
+      // (트랜잭션 커밋/롤백 시 자동 해제되므로 별도 unlock 불필요)
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        userId,
+      ]);
+
       await manager.delete(UserExamAttempt, { user_id: userId });
 
       const attempt = manager.create(UserExamAttempt, {

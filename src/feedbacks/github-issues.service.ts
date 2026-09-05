@@ -16,6 +16,15 @@ type FeedbackForIssue = Pick<
   'type' | 'content' | 'question_id' | 'page_url'
 >;
 
+/**
+ * GitHub는 `@사용자명` 멘션이나 마크다운을 그대로 해석하므로, 사용자가
+ * 적은 원문을 코드 블록으로 감싸서 멘션 핑/마크다운 인젝션을 막는다.
+ */
+function fenceUserContent(content: string): string {
+  const fence = content.includes('```') ? '````' : '```';
+  return `${fence}\n${content}\n${fence}`;
+}
+
 @Injectable()
 export class GithubIssuesService {
   private readonly logger = new Logger(GithubIssuesService.name);
@@ -41,14 +50,14 @@ export class GithubIssuesService {
    */
   async createIssue(
     feedback: FeedbackForIssue,
-    userEmail: string,
+    reporterId: string,
   ): Promise<{ number: number; url: string } | null> {
     try {
       const res = await axios.post(
         `${this.baseUrl}/issues`,
         {
           title: this.buildTitle(feedback),
-          body: this.buildBody(feedback, userEmail),
+          body: this.buildBody(feedback, reporterId),
           labels: [LABELS[feedback.type] ?? LABELS.other],
         },
         { headers: this.headers, timeout: 5000 },
@@ -109,13 +118,18 @@ export class GithubIssuesService {
       : `[${typeLabel}] 피드백`;
   }
 
-  private buildBody(feedback: FeedbackForIssue, userEmail: string): string {
+  /**
+   * 제보자는 이메일이 아닌 내부 userId로만 표시한다. 실제 신원 확인이
+   * 필요하면 관리자가 DB에서 userId로 조회한다 (GitHub는 private 레포여도
+   * 이메일 같은 PII를 외부 서비스에 그대로 보관하지 않기 위함).
+   */
+  private buildBody(feedback: FeedbackForIssue, reporterId: string): string {
     return [
-      `**제보자**: ${userEmail}`,
+      `**제보자 ID**: ${reporterId}`,
       feedback.question_id ? `**문항 ID**: ${feedback.question_id}` : null,
       feedback.page_url ? `**페이지**: ${feedback.page_url}` : null,
       '',
-      feedback.content,
+      fenceUserContent(feedback.content),
     ]
       .filter((line): line is string => line !== null)
       .join('\n');
@@ -125,11 +139,11 @@ export class GithubIssuesService {
    * 동일 문항 중복 제보를 기존 이슈에 합칠 때 다는 댓글 본문.
    * 신고자마다 의견/지적 내용이 다를 수 있으니 원문 content를 반드시 그대로 포함한다.
    */
-  buildCommentBody(feedback: FeedbackForIssue, userEmail: string): string {
+  buildCommentBody(feedback: FeedbackForIssue, reporterId: string): string {
     return [
       `**추가 제보** (${new Date().toISOString()})`,
-      `- 제보자: ${userEmail}`,
-      `- 내용: ${feedback.content}`,
+      `- 제보자 ID: ${reporterId}`,
+      `- 내용:\n${fenceUserContent(feedback.content)}`,
       feedback.page_url ? `- 페이지: ${feedback.page_url}` : null,
     ]
       .filter((line): line is string => line !== null)

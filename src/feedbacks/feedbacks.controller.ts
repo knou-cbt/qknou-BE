@@ -31,11 +31,7 @@ export class FeedbacksController {
   @ApiResponse({ status: 401, description: '인증 실패 (로그인 필요)' })
   @ApiResponse({ status: 404, description: '문항을 찾을 수 없음' })
   async create(@Body() dto: CreateFeedbackDto, @Req() req: any) {
-    const data = await this.feedbacksService.submit(
-      req.user.id,
-      req.user.email,
-      dto,
-    );
+    const data = await this.feedbacksService.submit(req.user.id, dto);
     return { success: true, data };
   }
 }
