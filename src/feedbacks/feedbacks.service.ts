@@ -2,22 +2,16 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Feedback } from './entities/feedback.entity';
-import { UserFeedbackLimit } from './entities/feedback-limit.entity';
 import { Questsion } from 'src/questions/entities/question.entity';
 import { CreateFeedbackDto } from './dto/create-feedback.dto';
 import { GithubIssuesService } from './github-issues.service';
 import { DiscordNotifyService } from './discord-notify.service';
-
-/** guards/feedback-limit.guard.ts의 DAILY_LIMIT과 반드시 같은 값이어야 함 */
-const DAILY_LIMIT = 15;
 
 @Injectable()
 export class FeedbacksService {
   constructor(
     @InjectRepository(Feedback)
     private feedbackRepository: Repository<Feedback>,
-    @InjectRepository(UserFeedbackLimit)
-    private feedbackLimitRepository: Repository<UserFeedbackLimit>,
     @InjectRepository(Questsion)
     private questionRepository: Repository<Questsion>,
     private githubIssuesService: GithubIssuesService,
@@ -67,15 +61,6 @@ export class FeedbacksService {
       isNewIssue,
       createdAt: feedback.created_at,
     };
-  }
-
-  async getRemainingCount(userId: string): Promise<number> {
-    const today = new Date().toISOString().split('T')[0];
-    const limit = await this.feedbackLimitRepository.findOne({
-      where: { user_id: userId, date: today as any },
-    });
-    if (!limit) return DAILY_LIMIT;
-    return Math.max(0, DAILY_LIMIT - limit.count);
   }
 
   /**
