@@ -72,6 +72,7 @@ async function bootstrap() {
     .addTag('tutor', 'AI 튜터 관련 API')
     .addTag('bookmarks', '북마크 관련 API')
     .addTag('mypage', '마이페이지 관련 API')
+    .addTag('notices', '업데이트 알림 관련 API')
     .addBearerAuth(
       {
         type: 'http',
