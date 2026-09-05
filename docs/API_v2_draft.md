@@ -3,14 +3,14 @@
 이 문서는 [API.md](./API.md)(1~20번, 기존 운영 API)에 이어지는 **v2 신규/변경 API 초안**입니다.
 확정 전까지는 이 파일에서 관리하고, 프론트 협의가 끝나면 `API.md`에 병합합니다.
 
-> ⚠️ **구현 상태 주의**: 아래 "상태"가 "설계만"인 항목(22~28)은 아직 백엔드 코드가 없어서 **호출하면 404가 납니다**. 나머지("구현 완료")는 실제로 붙여서 연동 테스트해도 됩니다.
+> ⚠️ **구현 상태 주의**: OCR 워커(pending→processing→parsed/failed 전이를 실제로 수행하는 부분)는 아직 별도 프로젝트로 미구현입니다. 그 외 API는 전부 구현 완료 상태입니다.
 
 **목차**
 
 | 번호 | 구분 | 설명 | 상태 |
 | --- | --- | --- | --- |
 | 21 | 피드백 | 피드백 제출 (GitHub Issue 자동 생성, 제출 횟수 제한 없음) | 구현 완료 (GitHub/Discord 실 연동은 미설정) |
-| 22~28 | 시험지 등록 | 사용자 업로드, 사전 중복 확인, 관리자 검수/수정/게시/반려 | 설계만 (미구현) |
+| 22~28 | 시험지 등록 | 사용자 업로드, 사전 중복 확인, 관리자 검수/수정/게시/반려 | 구현 완료 (OCR 워커 자체는 미구현) |
 | 29~31 | 업데이트 알림 | 활성 공지 조회, 내역 적재(관리자), 공지 발행(관리자) | 구현 완료 |
 | 32 | 마이페이지 | 최근 시험 풀이 기록 조회 (+ 기존 #11 제출 API 동작 변경) | 구현 완료 |
 | 33~35 | 북마크 | 목록 조회, 등록, 해제 | 구현 완료 |
@@ -158,8 +158,8 @@ Response:
 
 | 항목 | 값 |
 | --- | --- |
-| 허용 형식 | PDF만 (`application/pdf`, 확장자가 아니라 실제 매직바이트 `%PDF-` 검증) |
-| 최대 크기 | 20MB (Multer `fileSize` 제한으로 서버 메모리에 다 올라오기 전에 차단) |
+| 허용 형식 | PDF만 (확장자가 아니라 파일 앞 5바이트가 `%PDF-`인지 검증) |
+| 최대 크기 | 20MB. 초과 시 Multer가 파일을 다 받기도 전에 끊고 **413**을 반환 (Nest 프레임워크 기본 동작) |
 
 **Response**
 
@@ -170,13 +170,19 @@ Response:
 | data.status | 처리 상태 ("pending") | string | - | N |
 | data.createdAt | 등록일 | string (ISO 8601) | - | N |
 
+**중복 방지 (2단 방어)**
+
+1. 업로드 전에 `(subjectId, year, examType)` 조합으로 `exams`(이미 게시됨) + `exam_submissions`의 `pending`/`processing`/`parsed` 건(검수 진행 중)을 조회해서 걸러냄
+2. 그 사이 동시에 다른 요청이 먼저 접수했을 수 있으므로, DB에 부분 유니크 인덱스(`UQ_exam_submissions_active`, `status IN (pending,processing,parsed)`만 대상)를 걸어서 **최종적으로는 DB가 막음**. 이 제약에 걸리면 400으로 응답. `failed`/`rejected` 상태는 이 제약에서 제외되어 재업로드 가능.
+
 **Status**
 
 | status | response content |
 | --- | --- |
 | 201 | 접수 성공 (처리는 비동기) |
-| 400 | 이미 등록된 시험지 (중복) / 유효성 실패 / 파일 형식 오류(PDF 아님) / 크기 초과(20MB) |
+| 400 | 이미 등록된 시험지(중복) / PDF 아님 / 유효성 실패 |
 | 401 | 인증 실패 (로그인 필요) |
+| 413 | 파일 크기 초과 (20MB) |
 
 ---
 
@@ -240,25 +246,40 @@ Response:
 | **설명** | 관리자가 검수할 시험지 등록 목록을 조회합니다. |
 | **인증** | JWT Bearer Token + 관리자 권한 필수 |
 
+**상태 전이**
+
+```
+pending → processing → parsed → published
+                  └→ failed
+parsed  → rejected
+failed  → rejected
+```
+
+`pending`→`processing`→`parsed`/`failed` 전이는 OCR 워커(아직 미구현, 별도 프로젝트)가 DB를 직접 갱신하는 걸로 가정합니다. Nest 쪽엔 이 전이를 위한 API가 없습니다.
+
 **Request - Query parameter**
 
 | key | 설명 | value 타입 | 옵션 | Nullable | 예시 |
 | --- | --- | --- | --- | --- | --- |
 | status | 상태 필터 | string | optional | Y | "parsed" |
+| page | 페이지 번호 (기본 1) | number | optional | Y | 1 |
+| limit | 페이지당 개수 (기본 20, 최대 100) | number | optional | Y | 20 |
 
 **Response**
 
 | key | 설명 | value 타입 | 옵션 | Nullable |
 | --- | --- | --- | --- | --- |
 | success | 성공 여부 | boolean | - | N |
-| data[].id | 등록 ID | number | - | N |
-| data[].uploaderEmail | 업로드한 사용자 이메일 | string | - | N |
-| data[].subjectName | 과목명 | string | - | N |
-| data[].year | 연도 | number | - | N |
-| data[].examType | 시험 종류 | number | - | N |
-| data[].status | 처리 상태 | string | - | N |
-| data[].questionCount | OCR로 파싱된 문항 수 (parsed 이후) | number | optional | Y |
-| data[].createdAt | 등록일 | string | - | N |
+| data.items[].id | 등록 ID | number | - | N |
+| data.items[].uploaderEmail | 업로드한 사용자 이메일 | string | - | N |
+| data.items[].subjectName | 과목명 | string | - | N |
+| data.items[].year | 연도 | number | - | N |
+| data.items[].examType | 시험 종류 | number | - | N |
+| data.items[].status | 처리 상태 | string | - | N |
+| data.items[].createdAt | 등록일 | string | - | N |
+| data.total | 전체 개수 (필터 적용 기준) | number | - | N |
+| data.page | 현재 페이지 | number | - | N |
+| data.limit | 페이지당 개수 | number | - | N |
 
 **Status**
 
@@ -289,8 +310,9 @@ Response:
 | data.id | 등록 ID | number | - | N |
 | data.status | 처리 상태 | string | - | N |
 | data.fileUrl | 원본 파일 URL | string | - | N |
-| data.parsedResult | OCR 파싱 결과 (문항 배열, `questions` 엔티티와 동일 구조) | object \| null | - | Y |
+| data.parsedResult | OCR 파싱 결과. `{ examTitle, questions: [...] }` 형태 (아래 #26 참고). DB 엔티티 구조가 아니라 이 API 고유의 계약임 | object \| null | - | Y |
 | data.errorMessage | OCR 실패 사유 (status=failed일 때) | string | optional | Y |
+| data.version | 낙관적 락 버전. PATCH 호출 시 그대로 돌려보내야 함 | number | - | N |
 
 **Status**
 
@@ -311,14 +333,36 @@ Response:
 | --- | --- |
 | **Method** | PATCH |
 | **URL** | /api/admin/exam-submissions/:id |
-| **설명** | 관리자가 OCR 파싱 결과를 검수하며 수정합니다. 게시 전까지 여러 번 호출 가능. |
+| **설명** | 관리자가 OCR 파싱 결과를 검수하며 수정합니다. `status`가 `parsed`일 때만 가능. |
 | **인증** | JWT Bearer Token + 관리자 권한 필수 |
 
 **Request - Body (JSON)**
 
 | key | 설명 | value 타입 | 옵션 | Nullable |
 | --- | --- | --- | --- | --- |
-| parsedResult | 수정된 문항 배열 (전체 교체) | object | - | N |
+| parsedResult.examTitle | 시험 제목 | string | - | N |
+| parsedResult.questions[].questionNumber | 문항 번호 | number | - | N |
+| parsedResult.questions[].questionText | 지문 | string | - | N |
+| parsedResult.questions[].exampleText | 예시/보기 | string | optional | Y |
+| parsedResult.questions[].sharedExample | 공통 보기 | string | optional | Y |
+| parsedResult.questions[].sharedExampleImageUrls | 공통 보기 이미지 URL | array of string | optional | Y |
+| parsedResult.questions[].questionImageUrls | 문항 이미지 URL | array of string | optional | Y |
+| parsedResult.questions[].correctAnswers | 정답 번호 배열 | array of number | - | N |
+| parsedResult.questions[].choices[].number | 선택지 번호 | number | - | N |
+| parsedResult.questions[].choices[].text | 선택지 텍스트 | string | - | N |
+| parsedResult.questions[].choices[].imageUrls | 선택지 이미지 URL | array of string | - | Y |
+| parsedResult.questions[].explanation | 해설 | string | optional | Y |
+| expectedVersion | #25에서 조회한 `version` 값 그대로 | number | - | N |
+
+**동시 수정 방지**: `expectedVersion`이 현재 DB의 `version`과 다르면 (다른 관리자가 먼저 수정) 409. 성공하면 서버가 `version`을 1 증가시키므로, 다음 PATCH 때는 응답으로 받은 새 `version`을 써야 합니다.
+
+**Response**
+
+| key | 설명 | value 타입 | 옵션 | Nullable |
+| --- | --- | --- | --- | --- |
+| success | 성공 여부 | boolean | - | N |
+| data.id | 등록 ID | number | - | N |
+| data.version | 갱신된 버전 (다음 PATCH에 사용) | number | - | N |
 
 **Status**
 
@@ -329,6 +373,7 @@ Response:
 | 401 | 인증 실패 |
 | 403 | 관리자 권한 없음 |
 | 404 | 등록 건을 찾을 수 없음 |
+| 409 | `parsed` 상태가 아니거나, `expectedVersion` 불일치(동시 수정 충돌) |
 
 ---
 
@@ -340,26 +385,28 @@ Response:
 | --- | --- |
 | **Method** | POST |
 | **URL** | /api/admin/exam-submissions/:id/publish |
-| **설명** | 검수 완료된 `parsedResult`를 실제 `exams`/`questions`에 반영하고 등록 건 상태를 `published`로 변경합니다. |
+| **설명** | 검수 완료된 `parsedResult`를 실제 `exams`/`questions`에 반영하고 등록 건 상태를 `published`로 변경합니다. `status`가 `parsed`일 때만 가능. |
 | **인증** | JWT Bearer Token + 관리자 권한 필수 |
+
+**멱등성**: 이미 `published`인 건을 다시 호출하면 에러 없이 기존 `examId`를 그대로 반환합니다(중복 클릭/재시도 대비). 동일 `(subjectId, year, examType)` 조합으로의 동시 게시는 서버가 advisory lock으로 직렬화해서, 먼저 커밋된 것만 성공하고 나머지는 409를 받습니다.
 
 **Response**
 
 | key | 설명 | value 타입 | 옵션 | Nullable |
 | --- | --- | --- | --- | --- |
 | success | 성공 여부 | boolean | - | N |
-| data.examId | 새로 생성된 시험 ID | number | - | N |
+| data.examId | 생성된(또는 기존) 시험 ID | number | - | N |
 
 **Status**
 
 | status | response content |
 | --- | --- |
-| 200 | 게시 성공 |
-| 400 | parsedResult가 비어있거나 유효하지 않음 |
+| 200 | 게시 성공 (또는 이미 게시되어 있던 examId 반환) |
+| 400 | parsedResult가 비어있음 |
 | 401 | 인증 실패 |
 | 403 | 관리자 권한 없음 |
 | 404 | 등록 건을 찾을 수 없음 |
-| 409 | 그 사이 동일 조합(subjectId/year/examType)의 시험이 이미 게시됨 |
+| 409 | `parsed` 상태가 아니거나, 동일 조합의 시험이 이미 존재함 |
 
 ---
 
@@ -371,23 +418,26 @@ Response:
 | --- | --- |
 | **Method** | POST |
 | **URL** | /api/admin/exam-submissions/:id/reject |
-| **설명** | 등록 건을 반려 처리합니다. |
+| **설명** | `parsed` 또는 `failed` 상태인 등록 건을 반려 처리합니다. |
 | **인증** | JWT Bearer Token + 관리자 권한 필수 |
 
 **Request - Body (JSON)**
 
 | key | 설명 | value 타입 | 옵션 | Nullable |
 | --- | --- | --- | --- | --- |
-| reason | 반려 사유 | string | - | N |
+| reason | 반려 사유 (최대 1000자) | string | - | N |
+
+이미 `rejected`인 건을 다시 호출하면 에러 없이 그대로 성공 응답(멱등). `published`인 건은 반려 불가(409).
 
 **Status**
 
 | status | response content |
 | --- | --- |
-| 200 | 반려 처리 성공 |
+| 200 | 반려 처리 성공 (또는 이미 반려되어 있던 상태 그대로 반환) |
 | 401 | 인증 실패 |
 | 403 | 관리자 권한 없음 |
 | 404 | 등록 건을 찾을 수 없음 |
+| 409 | 반려할 수 없는 상태 (예: 이미 게시됨) |
 
 ---
 

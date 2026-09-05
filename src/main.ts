@@ -75,6 +75,7 @@ async function bootstrap() {
     .addTag('notices', '업데이트 알림 관련 API')
     .addTag('feedbacks', '피드백 관련 API')
     .addTag('questions', '문항 관련 API')
+    .addTag('exam-submissions', '시험지 등록 관련 API')
     .addBearerAuth(
       {
         type: 'http',
