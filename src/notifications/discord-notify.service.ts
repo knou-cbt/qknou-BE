@@ -2,6 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 
+/**
+ * Discord Incoming Webhook 알림 전송. 피드백/업데이트 알림 등 여러
+ * 기능이 공용으로 쓰는 서비스라 feedbacks 밖으로 뺐다.
+ */
 @Injectable()
 export class DiscordNotifyService {
   private readonly logger = new Logger(DiscordNotifyService.name);
@@ -9,8 +13,8 @@ export class DiscordNotifyService {
   constructor(private configService: ConfigService) {}
 
   /**
-   * Discord Incoming Webhook으로 알림 전송. 실패해도 throw하지 않는다
-   * (Discord 장애가 피드백 접수 자체를 실패시키면 안 되므로).
+   * 실패해도 throw하지 않는다 (Discord 장애가 호출부의 본 기능을
+   * 실패시키면 안 되므로).
    */
   async notify(message: string): Promise<void> {
     const webhookUrl = this.configService.get('DISCORD_WEBHOOK_URL');

@@ -5,7 +5,7 @@ import { Feedback } from './entities/feedback.entity';
 import { Questsion } from 'src/questions/entities/question.entity';
 import { CreateFeedbackDto } from './dto/create-feedback.dto';
 import { GithubIssuesService } from './github-issues.service';
-import { DiscordNotifyService } from './discord-notify.service';
+import { DiscordNotifyService } from 'src/notifications/discord-notify.service';
 
 @Injectable()
 export class FeedbacksService {

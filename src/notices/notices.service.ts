@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { UpdateNotice } from './entities/update-notice.entity';
 import { UpdateEntry } from './entities/update-entry.entity';
+import { DiscordNotifyService } from 'src/notifications/discord-notify.service';
 
 /** 발행 시 노출 기간 (고정 7일) */
 const EXPOSE_DAYS = 7;
@@ -14,6 +15,7 @@ export class NoticesService {
     private noticeRepository: Repository<UpdateNotice>,
     @InjectRepository(UpdateEntry)
     private entryRepository: Repository<UpdateEntry>,
+    private discordNotifyService: DiscordNotifyService,
   ) {}
 
   /**
@@ -80,6 +82,10 @@ export class NoticesService {
     await this.entryRepository.update(
       { id: In(entryIds) },
       { notice_id: notice.id },
+    );
+
+    await this.discordNotifyService.notify(
+      `📢 업데이트 공지 발행: ${title}\n노출 기간: ~${exposeEndAt.toISOString().slice(0, 10)}`,
     );
 
     return notice;
