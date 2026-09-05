@@ -73,6 +73,7 @@ async function bootstrap() {
     .addTag('bookmarks', '북마크 관련 API')
     .addTag('mypage', '마이페이지 관련 API')
     .addTag('notices', '업데이트 알림 관련 API')
+    .addTag('feedbacks', '피드백 관련 API')
     .addBearerAuth(
       {
         type: 'http',
