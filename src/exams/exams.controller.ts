@@ -7,6 +7,8 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -19,6 +21,7 @@ import { GetQuestionsQueryDto } from './dto/get-questions-query.dto';
 import { FindQuestionsResponseDto } from './dto/find-questions-response.dto';
 import { ExamsService } from './exams.service';
 import { SubmitExamDto } from './dto/submit-exam.dto';
+import { OptionalJwtAuthGuard } from 'src/auth/guards/optional-jwt-auth.guard';
 
 @ApiTags('exams')
 @Controller('api/exams')
@@ -66,9 +69,11 @@ export class ExamsController {
    * POST /api/exams/:id/submit
    */
   @Post(':id/submit')
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({
     summary: '시험 제출',
-    description: '시험 답안을 제출하고 채점 결과를 받습니다.',
+    description:
+      '시험 답안을 제출하고 채점 결과를 받습니다. 로그인 상태로 호출하면 "최근 풀이 기록"(마이페이지)에 자동 저장됩니다(이전 기록은 대체됨). 비로그인이어도 채점은 동일하게 동작합니다.',
   })
   @ApiParam({ name: 'id', description: '시험 ID', type: Number })
   @ApiResponse({ status: 200, description: '채점 완료' })
@@ -77,11 +82,16 @@ export class ExamsController {
   async submitExam(
     @Param('id', ParseIntPipe) id: number,
     @Body() submitDto: SubmitExamDto,
+    @Req() req: any,
   ) {
     if (!submitDto.answers || submitDto.answers.length === 0) {
       throw new BadRequestException('답안을 제출해주세요.');
     }
-    const data = await this.examsService.submitExam(id, submitDto.answers);
+    const data = await this.examsService.submitExam(
+      id,
+      submitDto.answers,
+      req.user?.id,
+    );
     return { success: true, data };
   }
 }

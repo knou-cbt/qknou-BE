@@ -15,6 +15,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { TutorModule } from './tutor/tutor.module';
 import { BookmarksModule } from './bookmarks/bookmarks.module';
+import { ExamHistoryModule } from './exam-history/exam-history.module';
 
 // DATABASE_URL의 비밀번호 부분을 URL 인코딩하는 함수
 function encodePasswordInUrl(url: string): string {
@@ -91,6 +92,7 @@ function encodePasswordInUrl(url: string): string {
     UsersModule,
     TutorModule,
     BookmarksModule,
+    ExamHistoryModule,
   ],
   controllers: [AppController],
   providers: [

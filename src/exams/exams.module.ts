@@ -6,12 +6,14 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Exam } from './entities/exam.entity';
 import { Questsion } from 'src/questions/entities/question.entity';
 import { TutorModule } from 'src/tutor/tutor.module';
+import { ExamHistoryModule } from 'src/exam-history/exam-history.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Exam, Questsion]),
     SubjectsModule,
     TutorModule,
+    ExamHistoryModule,
   ],
   controllers: [ExamsController],
   providers: [ExamsService],

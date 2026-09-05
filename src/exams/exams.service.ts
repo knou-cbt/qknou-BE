@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Exam } from './entities/exam.entity';
 import { DataSource, Repository } from 'typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
@@ -8,6 +8,7 @@ import * as cheerio from 'cheerio';
 import { InjectRepository } from '@nestjs/typeorm';
 import { TutorService } from 'src/tutor/tutor.service';
 import { formatCodeBlocks } from 'src/common/utils/code-formatter.util';
+import { ExamHistoryService } from 'src/exam-history/exam-history.service';
 
 /**
  * 복수 정답 매핑 테이블
@@ -34,6 +35,8 @@ const MULTIPLE_ANSWER_MAP: Record<string, number[]> = {
  */
 @Injectable()
 export class ExamsService {
+  private readonly logger = new Logger(ExamsService.name);
+
   constructor(
     @InjectRepository(Exam)
     private examRepository: Repository<Exam>,
@@ -42,6 +45,7 @@ export class ExamsService {
     private subjectsService: SubjectsService, // 과목 관리 서비스
     private dataSource: DataSource, // TypeORM DataSource (트랜잭션 처리용)
     private tutorService: TutorService,
+    private examHistoryService: ExamHistoryService,
   ) {}
 
   /**
@@ -166,6 +170,7 @@ export class ExamsService {
   async submitExam(
     examId: number,
     answers: { questionId: number; selectedAnswer: number | null }[],
+    userId?: string,
   ) {
     //1. 시험 정보 조회 (필요한 필드만)
     const exam = await this.examRepository.findOne({
@@ -218,6 +223,20 @@ export class ExamsService {
 
     //5. 점수 계산
     const score = Math.round((correctCount / questions.length) * 100);
+
+    //6. 로그인한 사용자면 "최근 풀이 기록"으로 저장 (실패해도 채점 응답 자체는 그대로 내려줌)
+    if (userId) {
+      try {
+        await this.examHistoryService.saveAttempt(userId, examId, {
+          totalQuestions: questions.length,
+          correctCount,
+          results,
+        });
+      } catch (error) {
+        this.logger.error('풀이 기록 저장 실패', error as Error);
+      }
+    }
+
     return {
       examId,
       totalQuestions: questions.length,

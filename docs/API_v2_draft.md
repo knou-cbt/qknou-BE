@@ -535,8 +535,8 @@
 | data.answers[].questionId | 문항 ID | number | - | N |
 | data.answers[].questionNumber | 문항 번호 | number | - | N |
 | data.answers[].questionText | 문제 내용 | string | - | N |
-| data.answers[].userAnswers | 사용자가 선택한 답 | array of number | - | N |
-| data.answers[].correctAnswers | 정답 | array of number | - | N |
+| data.answers[].userAnswer | 사용자가 선택한 답 (미선택 시 null, 기존 제출 API가 문항당 단일 선택만 지원) | number \| null | - | Y |
+| data.answers[].correctAnswers | 정답 (복수 정답 문항이면 여러 개) | array of number | - | N |
 | data.answers[].isCorrect | 정오답 여부 | boolean | - | N |
 
 **Status**
