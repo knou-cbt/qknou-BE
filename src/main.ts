@@ -70,6 +70,7 @@ async function bootstrap() {
     .addTag('departments', '학과 관련 API')
     .addTag('auth', '인증 관련 API')
     .addTag('tutor', 'AI 튜터 관련 API')
+    .addTag('bookmarks', '북마크 관련 API')
     .addBearerAuth(
       {
         type: 'http',
