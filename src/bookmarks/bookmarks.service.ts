@@ -91,4 +91,14 @@ export class BookmarksService {
       question_id: questionId,
     });
   }
+
+  /**
+   * 특정 문항의 북마크 여부 확인 (암기모드/공유 문항 조회 시 사용)
+   */
+  async isBookmarked(userId: string, questionId: number): Promise<boolean> {
+    const count = await this.bookmarkRepository.count({
+      where: { user_id: userId, question_id: questionId },
+    });
+    return count > 0;
+  }
 }

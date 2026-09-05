@@ -14,7 +14,7 @@
 | 29~31 | 업데이트 알림 | 활성 공지 조회, 내역 적재(관리자), 공지 발행(관리자) | 구현 완료 |
 | 32 | 마이페이지 | 최근 시험 풀이 기록 조회 (+ 기존 #11 제출 API 동작 변경) | 구현 완료 |
 | 33~35 | 북마크 | 목록 조회, 등록, 해제 | 구현 완료 |
-| 36 | 문항 | 문항 단건 공개 조회 (암기모드 공유 진입점) | 설계만 (미구현) |
+| 36 | 문항 | 문항 단건 공개 조회 (암기모드 공유 진입점) | 구현 완료 |
 
 **공통 규칙**
 - 응답 포맷은 기존과 동일하게 `{ success: boolean, data: ... }` 기본.
@@ -619,6 +619,9 @@
 | data.id | 문항 ID | number | - | N |
 | data.questionNumber | 문항 번호 | number | - | N |
 | data.text | 문제 지문 | string | - | N |
+| data.example | 예시/보기 텍스트 (#10과 동일하게 코드 블록 포맷팅 적용) | string | optional | Y |
+| data.sharedExample | 공통 보기 텍스트 | string | optional | Y |
+| data.imageUrls | 문항 이미지 URL 배열 | array of string | optional | Y |
 | data.choices | 선택지 배열 (#10과 동일 구조) | array | - | N |
 | data.correctAnswers | 정답 번호 배열 | array of number | - | N |
 | data.explanation | 해설 | string | optional | Y |
