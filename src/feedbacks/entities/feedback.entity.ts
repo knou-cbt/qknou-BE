@@ -38,10 +38,10 @@ export class Feedback {
   page_url: string | null;
 
   @Column({ type: 'int', nullable: true })
-  github_issue_number: number | null;
+  github_issue_number: number | null = null;
 
   @Column({ type: 'text', nullable: true })
-  github_issue_url: string | null;
+  github_issue_url: string | null = null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
