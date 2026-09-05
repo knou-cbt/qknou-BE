@@ -10,7 +10,9 @@ process.env.TZ = 'Asia/Seoul';
 async function bootstrap() {
   const questionId = parseInt(process.argv[2]);
   if (!questionId) {
-    console.error('사용법: yarn ts-node src/scripts/regenerate-explanation.ts <question_id>');
+    console.error(
+      '사용법: yarn ts-node src/scripts/regenerate-explanation.ts <question_id>',
+    );
     process.exit(1);
   }
 
@@ -18,7 +20,9 @@ async function bootstrap() {
 
   try {
     const tutorService = app.get(TutorService);
-    const questionRepo = app.get<Repository<Questsion>>(getRepositoryToken(Questsion));
+    const questionRepo = app.get<Repository<Questsion>>(
+      getRepositoryToken(Questsion),
+    );
 
     const question = await questionRepo.findOne({ where: { id: questionId } });
     if (!question) {
@@ -32,7 +36,8 @@ async function bootstrap() {
     console.log('');
     console.log('해설 재생성 중...');
 
-    const { explanation, conceptTags } = await tutorService.generateExplanation(question);
+    const { explanation, conceptTags } =
+      await tutorService.generateExplanation(question);
 
     console.log('');
     console.log('✅ 해설 재생성 완료!');

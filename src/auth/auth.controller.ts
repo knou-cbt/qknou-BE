@@ -82,7 +82,10 @@ export class AuthController {
     description:
       '카카오 OAuth 로그인 페이지로 리다이렉트합니다. Swagger에서는 테스트 불가, 브라우저에서 직접 접속하세요.',
   })
-  @ApiResponse({ status: 302, description: '카카오 로그인 페이지로 리다이렉트' })
+  @ApiResponse({
+    status: 302,
+    description: '카카오 로그인 페이지로 리다이렉트',
+  })
   async kakaoAuth() {
     // Guard가 자동으로 카카오 로그인 페이지로 리다이렉트
   }
@@ -117,7 +120,8 @@ export class AuthController {
   @UseGuards(AuthGuard('jwt'))
   @ApiOperation({
     summary: '현재 사용자 조회 (JWT 인증 테스트)',
-    description: 'JWT 토큰이 유효한지 테스트하고 현재 로그인한 사용자 정보를 반환합니다.',
+    description:
+      'JWT 토큰이 유효한지 테스트하고 현재 로그인한 사용자 정보를 반환합니다.',
   })
   @ApiResponse({
     status: 200,

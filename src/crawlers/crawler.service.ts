@@ -89,7 +89,9 @@ export class CrawlerService {
     const html = clone.html() || '';
     return html
       .replace(/<(?!\/?u[ >])[^>]+>/g, '') // <u>/<\/u> 제외 모든 태그 제거
-      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
+        String.fromCodePoint(parseInt(hex, 16)),
+      )
       .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec)))
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
@@ -251,7 +253,12 @@ export class CrawlerService {
   /**
    * 3단계: 개별 시험지 크롤링 및 DB 저장
    */
-  async crawlExam(url: string, forceRetry: boolean = false, skipAnswers: boolean = false, grade?: string) {
+  async crawlExam(
+    url: string,
+    forceRetry: boolean = false,
+    skipAnswers: boolean = false,
+    grade?: string,
+  ) {
     // ========================================
     // 1단계: HTML 다운로드 및 파싱
     // ========================================
@@ -508,7 +515,9 @@ export class CrawlerService {
             }
           }
 
-          console.log(`  📌 공통 보기 감지: 문제 ${startNum}~${endNum}${sharedImageUrls.length > 0 ? ` (이미지 ${sharedImageUrls.length}개)` : ''}`);
+          console.log(
+            `  📌 공통 보기 감지: 문제 ${startNum}~${endNum}${sharedImageUrls.length > 0 ? ` (이미지 ${sharedImageUrls.length}개)` : ''}`,
+          );
         } else {
           console.log(
             `  ⚠️  공통 보기 구간 패턴 매칭 실패: "${fullText.substring(0, 80)}"`,
@@ -662,7 +671,8 @@ export class CrawlerService {
 
       // 공통 보기는 별도 필드로 저장
       const sharedExample = sharedExampleMap.get(questionNumber) || null;
-      const sharedExampleImageUrls = sharedExampleImageMap.get(questionNumber) || null;
+      const sharedExampleImageUrls =
+        sharedExampleImageMap.get(questionNumber) || null;
 
       const questionRow = table.find(`tr.${questionRowClass} td`);
       const questionText = this.extractTextWithUnderline(questionRow, $)
@@ -1101,7 +1111,12 @@ export class CrawlerService {
             console.log(
               `  [${j + 1}/${examLinks.length}] 크롤링: ${examLinks[j]}`,
             );
-            const result = await this.crawlExam(examLinks[j], forceRetry, skipAnswers, grade);
+            const result = await this.crawlExam(
+              examLinks[j],
+              forceRetry,
+              skipAnswers,
+              grade,
+            );
             successCount++;
 
             // 건너뛴 문제가 있으면 로그에 기록

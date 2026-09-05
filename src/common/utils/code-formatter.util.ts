@@ -12,7 +12,7 @@ function formatCppCode(code: string): string {
   let indentLevel = 0;
 
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i].trim();
+    const line = lines[i].trim();
     if (!line) {
       formatted.push('');
       continue;
@@ -41,7 +41,10 @@ function formatCppCode(code: string): string {
       indentLevel++;
     }
     // } else if, } else 같은 패턴 처리
-    else if (line.startsWith('}') && (line.includes('else') || line.includes('catch'))) {
+    else if (
+      line.startsWith('}') &&
+      (line.includes('else') || line.includes('catch'))
+    ) {
       if (line.endsWith('{')) {
         indentLevel++;
       }
@@ -52,7 +55,11 @@ function formatCppCode(code: string): string {
       // 다음 줄이 존재하고, 중괄호나 제어문이 아니면 임시로 들여쓰기 증가
       if (i < lines.length - 1) {
         const nextLine = lines[i + 1].trim();
-        if (nextLine && !nextLine.startsWith('{') && !/^(if|for|while|else)/.test(nextLine)) {
+        if (
+          nextLine &&
+          !nextLine.startsWith('{') &&
+          !/^(if|for|while|else)/.test(nextLine)
+        ) {
           indentLevel++;
           // 다음 줄 처리 후 바로 감소시킬 플래그
           i++;
@@ -152,9 +159,9 @@ function detectLanguage(code: string): string {
     /class\s+\w+\s+extends/.test(trimmed) ||
     /System\.out\.println/.test(trimmed) ||
     /public\s+static\s+void\s+main/.test(trimmed) ||
-    /\bString\s+\w+/.test(trimmed) ||  // String 타입 (Java)
-    /\bpublic\s+void/.test(trimmed) ||  // public void 메서드 (Java)
-    /\bnew\s+\w+\s*\(/.test(trimmed)    // new 키워드 (Java/C++ 공통이지만 Java에서 더 흔함)
+    /\bString\s+\w+/.test(trimmed) || // String 타입 (Java)
+    /\bpublic\s+void/.test(trimmed) || // public void 메서드 (Java)
+    /\bnew\s+\w+\s*\(/.test(trimmed) // new 키워드 (Java/C++ 공통이지만 Java에서 더 흔함)
   ) {
     return 'java';
   }
@@ -168,7 +175,9 @@ function detectLanguage(code: string): string {
     /std::/.test(trimmed) ||
     /public:|private:|protected:/.test(trimmed) ||
     // 함수 정의 패턴 (int, void, double, float 등)
-    /(int|void|double|float|char|bool|long|short)\s+\w+\s*\([^)]*\)\s*\{/.test(trimmed) ||
+    /(int|void|double|float|char|bool|long|short)\s+\w+\s*\([^)]*\)\s*\{/.test(
+      trimmed,
+    ) ||
     // const, return 키워드
     /\bconst\s+(int|double|float|char)\b/.test(trimmed) ||
     /return\s+.*;/.test(trimmed) ||
@@ -202,7 +211,7 @@ export function formatCodeBlocks(text: string): string {
   // 코드 블록 패턴: ```...``` 또는 ```언어\n...\n```
   // 더 유연한 패턴: 백틱 3개 이상, 선택적 언어, 내용, 백틱 3개 이상
   const pattern = /```+(\w*)\n?([\s\S]*?)```+/g;
-  
+
   const result = text.replace(pattern, (match, lang, code) => {
     const trimmedCode = code.trim();
     if (!trimmedCode) return match;
@@ -220,7 +229,7 @@ export function formatCodeBlocks(text: string): string {
         }
       }
     }
-    
+
     if (hasProperIndent) {
       return match; // 이미 포맷팅되어 있음
     }
