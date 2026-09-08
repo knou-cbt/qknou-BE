@@ -52,7 +52,11 @@ function encodePasswordInUrl(url: string): string {
       useFactory: (configService: ConfigService) => {
         const databaseUrl = configService.get('DATABASE_URL');
         const nodeEnv = configService.get('NODE_ENV');
-        const synchronize = nodeEnv !== 'production';
+        // NODE_ENV(dev/prod)로 자동 판단하지 않는다 — 로컬 .env가 NODE_ENV=development인
+        // 채로 운영 DATABASE_URL을 가리키는 사고가 실제로 있었음(synchronize가 켜져서
+        // 운영 스키마를 건드릴 뻔함). 기본값은 항상 false, 진짜 필요할 때만
+        // DB_SYNCHRONIZE=true를 명시적으로 켜도록 분리.
+        const synchronize = configService.get('DB_SYNCHRONIZE') === 'true';
 
         // 디버깅 로그
         console.log('=== TypeORM 설정 확인 ===');
@@ -67,7 +71,7 @@ function encodePasswordInUrl(url: string): string {
           type: 'postgres',
           url: encodedUrl,
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
-          synchronize: synchronize, // 프로덕션에서는 false
+          synchronize: synchronize, // 기본 false. DB_SYNCHRONIZE=true를 명시해야만 켜짐
           timezone: 'Asia/Seoul', // 한국 시간대 설정
           logging: false, // 로깅 비활성화
           ssl: nodeEnv === 'production' ? { rejectUnauthorized: false } : false,
