@@ -25,7 +25,6 @@ import {
 } from '@nestjs/swagger';
 import { ExamSubmissionsService } from './exam-submissions.service';
 import { UploadExamSubmissionDto } from './dto/upload-exam-submission.dto';
-import { CheckDuplicateQueryDto } from './dto/check-duplicate-query.dto';
 import { PatchParsedResultDto } from './dto/patch-parsed-result.dto';
 import { RejectSubmissionDto } from './dto/reject-submission.dto';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
@@ -80,26 +79,6 @@ export class ExamSubmissionsController {
       year: dto.year,
       examType: dto.examType,
     });
-    return { success: true, data };
-  }
-
-  /**
-   * GET /api/exam-submissions/check
-   * 사전 중복 확인 (인증 불필요)
-   */
-  @Get('api/exam-submissions/check')
-  @ApiOperation({
-    summary: '시험지 등록 - 사전 중복 확인',
-    description:
-      '업로드 전에 (subjectId, year, examType) 조합이 이미 등록돼 있는지 확인합니다. UX 보조용이며 최종 방어선은 업로드 API의 DB 제약입니다.',
-  })
-  @ApiResponse({ status: 200, description: '조회 성공' })
-  async check(@Query() query: CheckDuplicateQueryDto) {
-    const data = await this.examSubmissionsService.checkDuplicate(
-      query.subjectId,
-      query.year,
-      query.examType,
-    );
     return { success: true, data };
   }
 
