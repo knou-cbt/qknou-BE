@@ -1562,23 +1562,44 @@ def convert_pipe_tables_to_markdown(s: str) -> str:
     return "\n".join(result)
 
 
+_CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+
+
 def normalize_ws(s: str) -> str:
-    """공백을 정규화하되, 파이프 테이블 행 사이의 줄바꿈은 보존."""
-    lines = (s or "").strip().split("\n")
+    """공백을 정규화하되, 파이프 테이블 행 사이의 줄바꿈과 ``` 코드 블록
+    내부의 줄바꿈/들여쓰기(알고리즘 의사코드 등)는 그대로 보존한다."""
+    # 코드 블록은 줄 단위 정규화 대상에서 빼고 원문 그대로 보존해야 하므로
+    # 먼저 플레이스홀더로 치환해둔다 (내부 줄바꿈이 사라지지 않도록).
+    code_blocks: list[str] = []
+
+    def _stash_code(m: re.Match) -> str:
+        code_blocks.append(m.group(0))
+        return f"\x00CODE{len(code_blocks) - 1}\x00"
+
+    s = _CODE_FENCE_RE.sub(_stash_code, s or "")
+
+    lines = s.strip().split("\n")
     processed = [re.sub(r"[ \t]+", " ", line).strip() for line in lines]
     processed = [l for l in processed if l]
 
     parts = []
     for line in processed:
+        is_code = "\x00CODE" in line
         if not parts:
             parts.append(line)
+        elif is_code or "\x00CODE" in parts[-1]:
+            parts.append("\n" + line)
         elif _is_pipe_table_row(line) or _is_pipe_table_row(parts[-1]):
             parts.append("\n" + line)
         elif line.startswith("·") or line.startswith("•"):
             parts.append("\n" + line)
         else:
             parts.append(" " + line)
-    return "".join(parts)
+    result = "".join(parts)
+
+    for i, block in enumerate(code_blocks):
+        result = result.replace(f"\x00CODE{i}\x00", block)
+    return result
 
 
 def split_question_blocks(text: str):
