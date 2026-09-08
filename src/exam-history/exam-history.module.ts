@@ -4,10 +4,9 @@ import { ExamHistoryController } from './exam-history.controller';
 import { ExamHistoryService } from './exam-history.service';
 import { UserExamAttempt } from './entities/user-exam-attempt.entity';
 import { UserExamAnswer } from './entities/user-exam-answer.entity';
-import { Exam } from 'src/exams/entities/exam.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UserExamAttempt, UserExamAnswer, Exam])],
+  imports: [TypeOrmModule.forFeature([UserExamAttempt, UserExamAnswer])],
   controllers: [ExamHistoryController],
   providers: [ExamHistoryService],
   exports: [ExamHistoryService],

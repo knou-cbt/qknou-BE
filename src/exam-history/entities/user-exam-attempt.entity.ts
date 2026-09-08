@@ -13,11 +13,11 @@ import {
 import { UserExamAnswer } from './user-exam-answer.entity';
 
 /**
- * 사용자별 최근 시험 풀이 기록.
- * 여러 건 누적하지 않고 user_id당 1건만 유지한다 (새로 제출하면 이전 기록 대체).
+ * 사용자별 시험 풀이 기록 (누적). 제출할 때마다 새 row가 쌓인다.
+ * 같은 시험을 다시 풀어도(재응시) 새 기록으로 추가되고 이전 기록은 남는다.
  */
 @Entity('user_exam_attempts')
-@Index('UQ_user_exam_attempts_user', ['user_id'], { unique: true })
+@Index('IDX_user_exam_attempts_user_id', ['user_id'])
 export class UserExamAttempt {
   @PrimaryGeneratedColumn()
   id: number;

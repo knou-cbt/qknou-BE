@@ -1,4 +1,4 @@
-# QKNOU API 문서 — v2 고도화 초안 (21~35)
+# QKNOU API 문서 — v2 고도화 초안 (21~36)
 
 이 문서는 [API.md](./API.md)(1~20번, 기존 운영 API)에 이어지는 **v2 신규/변경 API 초안**입니다.
 확정 전까지는 이 파일에서 관리하고, 프론트 협의가 끝나면 `API.md`에 병합합니다.
@@ -12,9 +12,9 @@
 | 21 | 피드백 | 피드백 제출 (GitHub Issue 자동 생성, 제출 횟수 제한 없음) | 구현 완료 (GitHub/Discord 실 연동은 미설정) |
 | 22~27 | 시험지 등록 | 사용자 업로드(중복 검증은 서버 내부에서 처리), 관리자 검수/수정/게시/반려 | 구현 완료 (OCR 워커 자체는 미구현) |
 | 28~30 | 업데이트 알림 | 활성 공지 조회, 내역 적재(관리자), 공지 발행(관리자) | 구현 완료 |
-| 31 | 마이페이지 | 최근 시험 풀이 기록 조회 (+ 기존 #11 제출 API 동작 변경) | 구현 완료 |
-| 32~34 | 북마크 | 목록 조회, 등록, 해제 | 구현 완료 |
-| 35 | 문항 | 문항 단건 공개 조회 (암기모드 공유 진입점) | 구현 완료 |
+| 31~32 | 마이페이지 | 풀이 기록 목록(누적, 검색/페이지네이션) + 상세 조회 (+ 기존 #11 제출 API 동작 변경) | 구현 완료 |
+| 33~35 | 북마크 | 목록 조회, 등록, 해제 | 구현 완료 |
+| 36 | 문항 | 문항 단건 공개 조회 (암기모드 공유 진입점) | 구현 완료 |
 
 **공통 규칙**
 - 응답 포맷은 기존과 동일하게 `{ success: boolean, data: ... }` 기본.
@@ -493,7 +493,7 @@ failed  → rejected
 
 ---
 
-## 31. 마이페이지 - 최근 시험 풀이 기록 조회
+## 31. 마이페이지 - 풀이 기록 목록 조회
 
 ### **기본 정보**
 
@@ -501,7 +501,58 @@ failed  → rejected
 | --- | --- |
 | **Method** | GET |
 | **URL** | /api/users/me/exam-history |
-| **설명** | 가장 최근에 제출한 시험 1건과 문항별 정오답을 조회합니다. 여러 건을 누적하지 않고 항상 최신 1건만 존재합니다. |
+| **설명** | 지금까지 제출한 시험 풀이 기록을 최신순으로 조회합니다. **누적됩니다** — 같은 시험을 재응시해도 이전 기록이 지워지지 않고 새 기록으로 추가됩니다. |
+| **인증** | JWT Bearer Token 필수 |
+
+**Request - Query parameter**
+
+| key | 설명 | value 타입 | 옵션 | Nullable | 예시 |
+| --- | --- | --- | --- | --- | --- |
+| search | 시험 제목 검색어 | string | optional | Y | "데이터베이스" |
+| page | 페이지 번호 (기본 1) | number | optional | Y | 1 |
+| limit | 페이지당 개수 (기본 10, 최대 50) | number | optional | Y | 10 |
+
+**Response**
+
+| key | 설명 | value 타입 | 옵션 | Nullable |
+| --- | --- | --- | --- | --- |
+| success | 성공 여부 | boolean | - | N |
+| data.items[].id | 풀이 기록 ID (상세 조회 #32에 사용) | number | - | N |
+| data.items[].examId | 시험 ID | number | - | N |
+| data.items[].examTitle | 시험 제목 | string | - | N |
+| data.items[].subjectName | 과목명 | string | - | N |
+| data.items[].year | 연도 | number | - | N |
+| data.items[].examType | 시험 종류 | number | - | N |
+| data.items[].totalQuestions | 전체 문항 수 | number | - | N |
+| data.items[].correctCount | 맞은 문항 수 | number | - | N |
+| data.items[].wrongCount | 틀린 문항 수 | number | - | N |
+| data.items[].submittedAt | 제출 시각 | string | - | N |
+| data.total | 전체 풀이 기록 수 (검색 필터 적용 기준). 마이페이지 사이드바의 "풀었던 문제 N회" 같은 통계는 검색어 없이 호출한 이 값을 그대로 쓰면 됩니다 | number | - | N |
+| data.page | 현재 페이지 | number | - | N |
+| data.limit | 페이지당 개수 | number | - | N |
+
+**Status**
+
+| status | response content |
+| --- | --- |
+| 200 | 조회 성공 (기록 없으면 `data.items: []`, `data.total: 0`) |
+| 401 | 인증 실패 (로그인 필요) |
+
+**⚠️ 기존 API 변경 사항 (#11 시험 제출)**
+
+`POST /api/exams/:id/submit`은 그대로 두되, `Authorization` 헤더가 있으면 채점 후 결과를 새 풀이 기록으로 추가 저장합니다(누적, 덮어쓰지 않음). 헤더가 없으면 기존과 동일하게 저장 없이 채점 결과만 반환(비로그인 이용 유지). 헤더가 있는데 토큰이 유효하지 않으면(만료/위조) 401을 반환합니다(무효 토큰을 비로그인으로 조용히 처리하지 않음).
+
+---
+
+## 32. 마이페이지 - 풀이 기록 상세 조회
+
+### **기본 정보**
+
+| 항목 | 내용 |
+| --- | --- |
+| **Method** | GET |
+| **URL** | /api/users/me/exam-history/:attemptId |
+| **설명** | 풀이 기록 1건의 문항별 정오답을 조회합니다. `attemptId`는 #31 목록 응답의 `data.items[].id`. |
 | **인증** | JWT Bearer Token 필수 |
 
 **Response**
@@ -509,8 +560,9 @@ failed  → rejected
 | key | 설명 | value 타입 | 옵션 | Nullable |
 | --- | --- | --- | --- | --- |
 | success | 성공 여부 | boolean | - | N |
-| data | 풀이 기록 (없으면 null) | object \| null | - | Y |
+| data.id | 풀이 기록 ID | number | - | N |
 | data.exam.id | 시험 ID | number | - | N |
+| data.exam.title | 시험 제목 | string | - | N |
 | data.exam.subject | 과목명 | string | - | N |
 | data.exam.year | 연도 | number | - | N |
 | data.exam.examType | 시험 종류 | number | - | N |
@@ -521,7 +573,7 @@ failed  → rejected
 | data.answers[].questionId | 문항 ID | number | - | N |
 | data.answers[].questionNumber | 문항 번호 | number | - | N |
 | data.answers[].questionText | 문제 내용 | string | - | N |
-| data.answers[].userAnswer | 사용자가 선택한 답 (미선택 시 null, 기존 제출 API가 문항당 단일 선택만 지원) | number \| null | - | Y |
+| data.answers[].userAnswer | 사용자가 선택한 답 (미선택 시 null) | number \| null | - | Y |
 | data.answers[].correctAnswers | 정답 (복수 정답 문항이면 여러 개) | array of number | - | N |
 | data.answers[].isCorrect | 정오답 여부 | boolean | - | N |
 
@@ -529,18 +581,13 @@ failed  → rejected
 
 | status | response content |
 | --- | --- |
-| 200 | 조회 성공 (풀이 기록 없으면 `data: null`) |
+| 200 | 조회 성공 |
 | 401 | 인증 실패 (로그인 필요) |
-
-**⚠️ 기존 API 변경 사항 (#11 시험 제출)**
-
-`POST /api/exams/:id/submit`은 그대로 두되, `Authorization` 헤더가 있으면 채점 후 결과를 위 기록으로 저장(있으면 덮어쓰기)하도록 동작을 추가합니다. 헤더가 없으면 기존과 동일하게 저장 없이 채점 결과만 반환(비로그인 이용 유지). 헤더가 있는데 토큰이 유효하지 않으면(만료/위조) 401을 반환합니다(무효 토큰을 비로그인으로 조용히 처리하지 않음).
-
-**동시성**: 동일 사용자가 같은 시험을 짧은 간격으로 두 번 제출해도(중복 클릭/재시도) 서로의 delete→insert가 꼬이지 않도록, 저장 트랜잭션 안에서 `user_id` 기준 Postgres advisory lock으로 직렬화합니다. "최근"의 기준은 이 저장 트랜잭션이 커밋 완료된 순서입니다(요청이 서버에 도착한 순서가 아님).
+| 404 | 기록을 찾을 수 없음 (본인 기록이 아닌 경우도 404로 응답 — 다른 사람 기록 존재 여부를 유추 못 하게 함) |
 
 ---
 
-## 32. 북마크 - 목록 조회
+## 33. 북마크 - 목록 조회
 
 ### **기본 정보**
 
@@ -575,7 +622,7 @@ failed  → rejected
 
 ---
 
-## 33. 북마크 - 등록
+## 34. 북마크 - 등록
 
 ### **기본 정보**
 
@@ -597,7 +644,7 @@ failed  → rejected
 
 ---
 
-## 34. 북마크 - 해제
+## 35. 북마크 - 해제
 
 ### **기본 정보**
 
@@ -617,7 +664,7 @@ failed  → rejected
 
 ---
 
-## 35. 문항 - 단건 공개 조회 (암기모드 공유 진입점)
+## 36. 문항 - 단건 공개 조회 (암기모드 공유 진입점)
 
 ### **기본 정보**
 

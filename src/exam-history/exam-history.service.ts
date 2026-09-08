@@ -1,9 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { UserExamAttempt } from './entities/user-exam-attempt.entity';
 import { UserExamAnswer } from './entities/user-exam-answer.entity';
-import { Exam } from 'src/exams/entities/exam.entity';
 
 export interface SubmitResultForHistory {
   totalQuestions: number;
@@ -24,14 +23,11 @@ export class ExamHistoryService {
     private attemptRepository: Repository<UserExamAttempt>,
     @InjectRepository(UserExamAnswer)
     private answerRepository: Repository<UserExamAnswer>,
-    @InjectRepository(Exam)
-    private examRepository: Repository<Exam>,
     private dataSource: DataSource,
   ) {}
 
   /**
-   * 시험 제출 결과를 "최근 풀이 기록"으로 저장.
-   * 기존 기록이 있으면 지우고 새로 저장(누적하지 않음).
+   * 시험 제출 결과를 풀이 기록으로 누적 저장 (재응시해도 새 기록으로 추가됨).
    * 채점 자체는 이미 끝난 상태라, 여기서 실패해도 호출부(submitExam)에서
    * 응답 자체를 실패시키지 않도록 try/catch로 감싸서 호출해야 한다.
    */
@@ -41,15 +37,6 @@ export class ExamHistoryService {
     result: SubmitResultForHistory,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
-      // 같은 사용자가 동시에 두 번 제출해도(중복 클릭/재시도) delete→insert가
-      // 서로 겹치지 않도록 트랜잭션 범위의 advisory lock으로 직렬화한다.
-      // (트랜잭션 커밋/롤백 시 자동 해제되므로 별도 unlock 불필요)
-      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-        userId,
-      ]);
-
-      await manager.delete(UserExamAttempt, { user_id: userId });
-
       const attempt = manager.create(UserExamAttempt, {
         user_id: userId,
         exam_id: examId,
@@ -74,20 +61,61 @@ export class ExamHistoryService {
   }
 
   /**
-   * 사용자의 최근 시험 풀이 기록 조회 (없으면 null)
+   * 사용자의 풀이 기록 목록 조회 (최신순, 시험 제목 검색 + 페이지네이션).
+   * "풀었던 문제 N회" 같은 통계는 여기 total을 그대로 쓰면 된다.
    */
-  async getLatestForUser(userId: string) {
-    const attempt = await this.attemptRepository.findOne({
-      where: { user_id: userId },
-    });
-    if (!attempt) {
-      return null;
+  async getHistoryForUser(
+    userId: string,
+    options: { search?: string; page: number; limit: number },
+  ) {
+    const { search, page, limit } = options;
+
+    const baseQb = this.attemptRepository
+      .createQueryBuilder('attempt')
+      .innerJoin('attempt.exam', 'exam')
+      .leftJoin('exam.subject', 'subject')
+      .where('attempt.user_id = :userId', { userId });
+
+    if (search) {
+      baseQb.andWhere('exam.title ILIKE :search', { search: `%${search}%` });
     }
 
-    const exam = await this.examRepository.findOne({
-      where: { id: attempt.exam_id },
-      relations: ['subject'],
+    const total = await baseQb.getCount();
+
+    const items = await baseQb
+      .clone()
+      .select('attempt.id', 'id')
+      .addSelect('exam.id', 'examId')
+      .addSelect('exam.title', 'examTitle')
+      .addSelect('subject.name', 'subjectName')
+      .addSelect('exam.year', 'year')
+      .addSelect('exam.exam_type', 'examType')
+      .addSelect('attempt.total_questions', 'totalQuestions')
+      .addSelect('attempt.correct_count', 'correctCount')
+      .addSelect('attempt.wrong_count', 'wrongCount')
+      .addSelect('attempt.submitted_at', 'submittedAt')
+      .orderBy('attempt.submitted_at', 'DESC')
+      .offset((page - 1) * limit)
+      .limit(limit)
+      .getRawMany();
+
+    return { items, total, page, limit };
+  }
+
+  /**
+   * 풀이 기록 1건 상세(문항별 정오답 포함) 조회.
+   * 본인 기록이 아니면(다른 사용자 것이면) 404로 취급해서 존재 여부를 숨긴다.
+   */
+  async getAttemptDetailForUser(userId: string, attemptId: number) {
+    const attempt = await this.attemptRepository.findOne({
+      where: { id: attemptId },
+      relations: ['exam', 'exam.subject'],
     });
+    if (!attempt || attempt.user_id !== userId) {
+      throw new NotFoundException(
+        `풀이 기록 id ${attemptId}를 찾을 수 없습니다.`,
+      );
+    }
 
     const answers = await this.answerRepository
       .createQueryBuilder('answer')
@@ -103,11 +131,13 @@ export class ExamHistoryService {
       .getRawMany();
 
     return {
+      id: attempt.id,
       exam: {
-        id: exam?.id ?? attempt.exam_id,
-        subject: exam?.subject?.name ?? null,
-        year: exam?.year ?? null,
-        examType: exam?.exam_type ?? null,
+        id: attempt.exam.id,
+        title: attempt.exam.title,
+        subject: attempt.exam.subject?.name ?? null,
+        year: attempt.exam.year,
+        examType: attempt.exam.exam_type,
       },
       totalQuestions: attempt.total_questions,
       correctCount: attempt.correct_count,

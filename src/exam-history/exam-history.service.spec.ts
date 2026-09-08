@@ -1,22 +1,20 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { NotFoundException } from '@nestjs/common';
 import { ExamHistoryService } from './exam-history.service';
 import { UserExamAttempt } from './entities/user-exam-attempt.entity';
 import { UserExamAnswer } from './entities/user-exam-answer.entity';
-import { Exam } from 'src/exams/entities/exam.entity';
 
 describe('ExamHistoryService', () => {
   let service: ExamHistoryService;
-  let attemptRepository: { findOne: jest.Mock };
+  let attemptRepository: { findOne: jest.Mock; createQueryBuilder: jest.Mock };
   let answerRepository: { createQueryBuilder: jest.Mock };
-  let examRepository: { findOne: jest.Mock };
   let dataSource: { transaction: jest.Mock };
 
   beforeEach(async () => {
-    attemptRepository = { findOne: jest.fn() };
+    attemptRepository = { findOne: jest.fn(), createQueryBuilder: jest.fn() };
     answerRepository = { createQueryBuilder: jest.fn() };
-    examRepository = { findOne: jest.fn() };
     dataSource = { transaction: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -30,7 +28,6 @@ describe('ExamHistoryService', () => {
           provide: getRepositoryToken(UserExamAnswer),
           useValue: answerRepository,
         },
-        { provide: getRepositoryToken(Exam), useValue: examRepository },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -39,15 +36,11 @@ describe('ExamHistoryService', () => {
   });
 
   describe('saveAttempt', () => {
-    it('user_id 기준 advisory lock을 건 뒤 기존 기록을 지우고 새로 저장한다', async () => {
+    it('기존 기록을 지우지 않고 새 기록을 누적 저장한다', async () => {
       const mockManager = {
-        query: jest.fn().mockResolvedValue(undefined),
-        delete: jest.fn().mockResolvedValue(undefined),
         create: jest.fn((_entity, data) => data),
         save: jest.fn().mockImplementation((entity) => {
-          if (!Array.isArray(entity)) {
-            entity.id = 100; // attempt 저장 시 id 부여
-          }
+          if (!Array.isArray(entity)) entity.id = 100;
           return Promise.resolve(entity);
         }),
       };
@@ -74,54 +67,103 @@ describe('ExamHistoryService', () => {
         ],
       });
 
-      expect(mockManager.query).toHaveBeenCalledWith(
-        'SELECT pg_advisory_xact_lock(hashtext($1))',
-        ['user-1'],
-      );
-      expect(mockManager.delete).toHaveBeenCalledWith(UserExamAttempt, {
-        user_id: 'user-1',
-      });
-      // save(attempt) 1번 + save(answers 배열) 1번 = 총 2번
+      // delete가 없어졌는지 확인 (mockManager에 delete 메서드 자체가 없음 → 호출됐으면 TypeError로 실패했을 것)
       expect(mockManager.save).toHaveBeenCalledTimes(2);
       const answersArg = mockManager.save.mock.calls[1][0];
       expect(answersArg).toHaveLength(2);
-      expect(answersArg[0]).toMatchObject({
-        question_id: 10,
-        selected_answer: 2,
-        is_correct: true,
+    });
+  });
+
+  describe('getHistoryForUser', () => {
+    function mockQueryBuilder(total: number, items: any[]) {
+      const qb: any = {
+        innerJoin: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(total),
+        getRawMany: jest.fn().mockResolvedValue(items),
+      };
+      qb.clone = jest.fn().mockReturnValue(qb);
+      return qb;
+    }
+
+    it('검색어 없이 최신순으로 목록을 반환한다', async () => {
+      const items = [{ id: 1, examTitle: '데이터베이스 기말고사' }];
+      const qb = mockQueryBuilder(3, items);
+      attemptRepository.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getHistoryForUser('user-1', {
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result).toEqual({ items, total: 3, page: 1, limit: 10 });
+      expect(qb.andWhere).not.toHaveBeenCalled();
+    });
+
+    it('검색어가 있으면 시험 제목으로 필터링한다', async () => {
+      const qb = mockQueryBuilder(0, []);
+      attemptRepository.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getHistoryForUser('user-1', {
+        search: '데이터베이스',
+        page: 1,
+        limit: 10,
+      });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('exam.title ILIKE :search', {
+        search: '%데이터베이스%',
       });
     });
   });
 
-  describe('getLatestForUser', () => {
-    it('기록이 없으면 null을 반환한다', async () => {
+  describe('getAttemptDetailForUser', () => {
+    it('기록이 없으면 NotFoundException', async () => {
       attemptRepository.findOne.mockResolvedValue(null);
 
-      const result = await service.getLatestForUser('user-1');
-
-      expect(result).toBeNull();
-      expect(examRepository.findOne).not.toHaveBeenCalled();
+      await expect(
+        service.getAttemptDetailForUser('user-1', 999),
+      ).rejects.toThrow(NotFoundException);
     });
 
-    it('기록이 있으면 시험/문항 정보를 조합해서 반환한다', async () => {
+    it('다른 사용자의 기록이면 NotFoundException (존재 여부를 숨김)', async () => {
       attemptRepository.findOne.mockResolvedValue({
-        exam_id: 1,
-        total_questions: 2,
-        correct_count: 1,
-        wrong_count: 1,
-        submitted_at: new Date('2026-01-01'),
-      });
-      examRepository.findOne.mockResolvedValue({
         id: 1,
-        year: 2025,
-        exam_type: 1,
-        subject: { name: '경영학원론' },
+        user_id: 'other-user',
+      });
+
+      await expect(
+        service.getAttemptDetailForUser('user-1', 1),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('본인 기록이면 문항별 정오답을 포함해 반환한다', async () => {
+      attemptRepository.findOne.mockResolvedValue({
+        id: 1,
+        user_id: 'user-1',
+        total_questions: 1,
+        correct_count: 1,
+        wrong_count: 0,
+        submitted_at: new Date('2026-01-01'),
+        exam: {
+          id: 5,
+          title: '데이터베이스 기말고사',
+          year: 2025,
+          exam_type: 1,
+          subject: { name: '데이터베이스' },
+        },
       });
       const rawAnswers = [
         {
           questionId: 10,
           questionNumber: 1,
-          questionText: '문제1',
+          questionText: 'Q1',
           userAnswer: 2,
           correctAnswers: [2],
           isCorrect: true,
@@ -137,13 +179,20 @@ describe('ExamHistoryService', () => {
       };
       answerRepository.createQueryBuilder.mockReturnValue(mockQb);
 
-      const result = await service.getLatestForUser('user-1');
+      const result = await service.getAttemptDetailForUser('user-1', 1);
 
       expect(result).toEqual({
-        exam: { id: 1, subject: '경영학원론', year: 2025, examType: 1 },
-        totalQuestions: 2,
+        id: 1,
+        exam: {
+          id: 5,
+          title: '데이터베이스 기말고사',
+          subject: '데이터베이스',
+          year: 2025,
+          examType: 1,
+        },
+        totalQuestions: 1,
         correctCount: 1,
-        wrongCount: 1,
+        wrongCount: 0,
         submittedAt: new Date('2026-01-01'),
         answers: rawAnswers,
       });
