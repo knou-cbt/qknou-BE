@@ -36,12 +36,11 @@ lerna-debug.log*
 !.vscode/extensions.json
 
 # dotenv environment variable files
+# (.env.* 패턴으로 통일 — .env.development처럼 .local 안 붙은 파일도
+#  실수로 커밋되지 않도록. .env.example만 예외로 추적함)
 .env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
-.env.production
+.env.*
+!.env.example
 env
 # temp directory
 .temp

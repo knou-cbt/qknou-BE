@@ -23,8 +23,10 @@ import { ExamSubmissionsModule } from './exam-submissions/exam-submissions.modul
 // DATABASE_URL의 비밀번호 부분을 URL 인코딩하는 함수
 function encodePasswordInUrl(url: string): string {
   try {
-    // postgresql://username:password@host:port/database 형식 파싱
-    const match = url.match(/^(postgresql:\/\/[^:]+:)([^@]+)(@.+)$/);
+    // postgresql://username:password@host:port/database 형식 파싱.
+    // 비밀번호 자체에 '@'가 들어있을 수 있어([^@]+로는 첫 '@'에서 잘못 끊김),
+    // 마지막 '@' 앞까지를 비밀번호로 greedy하게 잡는다.
+    const match = url.match(/^(postgresql:\/\/[^:]+:)(.+)(@[^@]+)$/);
 
     if (match) {
       const [, prefix, password, suffix] = match;
