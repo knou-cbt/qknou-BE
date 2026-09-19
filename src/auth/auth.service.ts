@@ -1,5 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcryptjs';
 import { User } from 'src/users/entities/user.entity';
 import { UsersService } from 'src/users/users.service';
 
@@ -8,6 +10,7 @@ export class AuthService {
   constructor(
     private usersService: UsersService, //사용자 DB 작업
     private jwtService: JwtService, //JWT 토큰 생성
+    private configService: ConfigService,
   ) {}
   /**
    * OAuth로 받은 사용자 정보를 검증하고 DB에 저장/업데이트
@@ -80,5 +83,38 @@ export class AuthService {
    */
   async validateUser(userId: string): Promise<User | null> {
     return this.usersService.findById(userId);
+  }
+
+  /**
+   * 관리자 로그인 (아이디/비밀번호)
+   * 구글/카카오 로그인과 완전히 별개 경로. users 테이블을 쓰지 않고
+   * ADMIN_USERNAME / ADMIN_PASSWORD_HASH 환경변수와 대조한다.
+   */
+  async loginAdmin(username: string, password: string) {
+    const adminUsername = this.configService.get<string>('ADMIN_USERNAME');
+    const adminPasswordHash = this.configService.get<string>(
+      'ADMIN_PASSWORD_HASH',
+    );
+
+    if (!adminUsername || !adminPasswordHash || username !== adminUsername) {
+      throw new UnauthorizedException(
+        '아이디 또는 비밀번호가 올바르지 않습니다.',
+      );
+    }
+
+    const passwordMatches = await bcrypt.compare(password, adminPasswordHash);
+    if (!passwordMatches) {
+      throw new UnauthorizedException(
+        '아이디 또는 비밀번호가 올바르지 않습니다.',
+      );
+    }
+
+    const payload = { sub: 'admin', role: 'admin' as const };
+    const accessToken = this.jwtService.sign(payload);
+
+    return {
+      access_token: accessToken,
+      user: { id: 'admin', role: 'admin', name: '관리자' },
+    };
   }
 }
