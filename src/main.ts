@@ -29,6 +29,7 @@ async function bootstrap() {
   // CORS 허용 origin (로컬 개발 포트 제한 없음)
   const allowedOrigins: (string | RegExp)[] = [
     'https://www.qknou.kr',
+    'https://qknou-fe.onrender.com',
     /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/, // 로컬: localhost/127.0.0.1 모든 포트
   ];
   const isOriginAllowed = (origin: string) =>
@@ -49,10 +50,11 @@ async function bootstrap() {
   app.enableCors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
-      callback(
-        isOriginAllowed(origin) ? null : new Error('Not allowed by CORS'),
-        isOriginAllowed(origin) ? origin : false,
-      );
+      // 허용되지 않은 origin은 에러를 던지지 않고 false만 반환한다.
+      // Error를 넘기면 cors 미들웨어가 next(err)로 전파해 CORS 차단이 아닌
+      // 500 Internal Server Error로 응답하게 되어, 프록시를 거쳐 Origin 헤더가
+      // 실려오는 서버-to-서버 요청까지 전부 깨지는 문제가 있었다.
+      callback(null, isOriginAllowed(origin));
     },
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
