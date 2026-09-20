@@ -64,6 +64,7 @@ export class QuestionsService {
       exam: {
         id: question.exam.id,
         title: question.exam.title,
+        year: question.exam.year,
         subject: question.exam.subject?.name ?? null,
       },
       isBookmarked,
