@@ -175,7 +175,7 @@ export class ExamsService {
     //1. 시험 정보 조회 (필요한 필드만)
     const exam = await this.examRepository.findOne({
       where: { id: examId },
-      select: ['id', 'total_questions'],
+      select: ['id', 'total_questions', 'subject_id', 'year'],
     });
     if (!exam) {
       throw new NotFoundException(`시험 id ${examId}를 찾을 수 없습니다.`);
@@ -227,11 +227,17 @@ export class ExamsService {
     //6. 로그인한 사용자면 "최근 풀이 기록"으로 저장 (실패해도 채점 응답 자체는 그대로 내려줌)
     if (userId) {
       try {
-        await this.examHistoryService.saveAttempt(userId, examId, {
-          totalQuestions: questions.length,
-          correctCount,
-          results,
-        });
+        await this.examHistoryService.saveAttempt(
+          userId,
+          examId,
+          exam.subject_id,
+          exam.year,
+          {
+            totalQuestions: questions.length,
+            correctCount,
+            results,
+          },
+        );
       } catch (error) {
         this.logger.error('풀이 기록 저장 실패', error as Error);
       }

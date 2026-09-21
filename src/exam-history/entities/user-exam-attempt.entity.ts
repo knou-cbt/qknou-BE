@@ -13,8 +13,9 @@ import {
 import { UserExamAnswer } from './user-exam-answer.entity';
 
 /**
- * 사용자별 시험 풀이 기록 (누적). 제출할 때마다 새 row가 쌓인다.
- * 같은 시험을 다시 풀어도(재응시) 새 기록으로 추가되고 이전 기록은 남는다.
+ * 사용자별 시험 풀이 기록. 같은 과목(subject) + 같은 연도(year)의 시험을
+ * 다시 풀면(재응시) 그 조합의 이전 기록은 삭제되고 최신 기록 1건만 남는다
+ * (연도가 다르면 별도 기록으로 유지됨. ExamHistoryService.saveAttempt 참고).
  */
 @Entity('user_exam_attempts')
 @Index('IDX_user_exam_attempts_user_id', ['user_id'])
