@@ -99,6 +99,40 @@ describe('BookmarksService', () => {
     });
   });
 
+  describe('findAllByUser', () => {
+    it('시험의 year/examType을 포함해 북마크 목록을 반환한다', async () => {
+      const rows = [
+        {
+          questionId: 1,
+          questionNumber: 3,
+          questionText: 'Q1',
+          examId: 10,
+          examTitle: '253-데이터베이스-3학년-1교시-(3p)2019',
+          year: 2019,
+          examType: 1,
+          subjectName: '데이터베이스',
+          bookmarkedAt: new Date('2026-01-01'),
+        },
+      ];
+      const qb: any = {
+        innerJoin: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(rows),
+      };
+      bookmarkRepository.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.findAllByUser('user-1');
+
+      expect(qb.addSelect).toHaveBeenCalledWith('exam.year', 'year');
+      expect(qb.addSelect).toHaveBeenCalledWith('exam.exam_type', 'examType');
+      expect(result).toEqual(rows);
+    });
+  });
+
   describe('remove', () => {
     it('북마크가 없어도 에러 없이 delete를 호출한다', async () => {
       bookmarkRepository.delete.mockResolvedValue({ affected: 0 });
