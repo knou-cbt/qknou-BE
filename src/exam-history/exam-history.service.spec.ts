@@ -105,9 +105,10 @@ describe('ExamHistoryService', () => {
 
       await service.saveAttempt('user-1', 1, 7, 2024, sampleResult);
 
-      expect(mockManager.delete).toHaveBeenCalledWith(UserExamAttempt, [
-        50, 51,
-      ]);
+      expect(mockManager.delete).toHaveBeenCalledWith(
+        UserExamAttempt,
+        [50, 51],
+      );
       expect(mockManager.save).toHaveBeenCalledTimes(2);
     });
   });
