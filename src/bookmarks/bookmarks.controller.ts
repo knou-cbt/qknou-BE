@@ -5,6 +5,7 @@ import {
   Delete,
   Param,
   ParseIntPipe,
+  Query,
   Req,
   Res,
   HttpStatus,
@@ -15,6 +16,7 @@ import {
   ApiTags,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
@@ -36,12 +38,24 @@ export class BookmarksController {
   @ApiOperation({
     summary: '북마크 목록 조회',
     description:
-      '로그인한 사용자가 북마크한 문항 목록을 최신 등록순으로 조회합니다.',
+      '로그인한 사용자가 북마크한 문항 목록을 최신 등록순으로 조회합니다. ' +
+      'withDetail=true를 주면 선택지/정답/해설 등 문항 상세를 함께 내려주며, ' +
+      '순차 복습(암기모드) 화면에서 문항별로 추가 조회 없이 바로 사용할 수 있습니다.',
+  })
+  @ApiQuery({
+    name: 'withDetail',
+    required: false,
+    type: Boolean,
+    description:
+      'true면 문항 상세(선택지/정답/해설/이미지)를 함께 반환합니다. 기본값 false.',
   })
   @ApiResponse({ status: 200, description: '조회 성공' })
   @ApiResponse({ status: 401, description: '인증 실패 (로그인 필요)' })
-  async findAll(@Req() req: any) {
-    const data = await this.bookmarksService.findAllByUser(req.user.id);
+  async findAll(@Req() req: any, @Query('withDetail') withDetail?: string) {
+    const data = await this.bookmarksService.findAllByUser(
+      req.user.id,
+      withDetail === 'true',
+    );
     return { success: true, data };
   }
 

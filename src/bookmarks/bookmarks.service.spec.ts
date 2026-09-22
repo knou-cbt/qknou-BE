@@ -100,7 +100,7 @@ describe('BookmarksService', () => {
   });
 
   describe('findAllByUser', () => {
-    it('시험의 year/examType을 포함해 북마크 목록을 반환한다', async () => {
+    it('시험의 year/examType/subjectId를 포함해 북마크 목록을 반환한다', async () => {
       const rows = [
         {
           questionId: 1,
@@ -110,6 +110,7 @@ describe('BookmarksService', () => {
           examTitle: '253-데이터베이스-3학년-1교시-(3p)2019',
           year: 2019,
           examType: 1,
+          subjectId: 5,
           subjectName: '데이터베이스',
           bookmarkedAt: new Date('2026-01-01'),
         },
@@ -129,7 +130,53 @@ describe('BookmarksService', () => {
 
       expect(qb.addSelect).toHaveBeenCalledWith('exam.year', 'year');
       expect(qb.addSelect).toHaveBeenCalledWith('exam.exam_type', 'examType');
+      expect(qb.addSelect).toHaveBeenCalledWith('subject.id', 'subjectId');
       expect(result).toEqual(rows);
+    });
+
+    it('withDetail=true면 문항 상세 필드까지 select한다', async () => {
+      const qb: any = {
+        innerJoin: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+      bookmarkRepository.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllByUser('user-1', true);
+
+      expect(qb.addSelect).toHaveBeenCalledWith('question.choices', 'choices');
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        'question.correct_answers',
+        'correctAnswers',
+      );
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        'question.explanation',
+        'explanation',
+      );
+    });
+
+    it('withDetail 기본값은 false라 문항 상세 필드를 select하지 않는다', async () => {
+      const qb: any = {
+        innerJoin: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+      bookmarkRepository.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAllByUser('user-1');
+
+      expect(qb.addSelect).not.toHaveBeenCalledWith(
+        'question.choices',
+        'choices',
+      );
     });
   });
 
