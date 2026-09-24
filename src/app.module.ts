@@ -59,6 +59,10 @@ function encodePasswordInUrl(url: string): string {
         // 운영 스키마를 건드릴 뻔함). 기본값은 항상 false, 진짜 필요할 때만
         // DB_SYNCHRONIZE=true를 명시적으로 켜도록 분리.
         const synchronize = configService.get('DB_SYNCHRONIZE') === 'true';
+        // SSL도 NODE_ENV 기준으로 자동 판단하지 않는다 — Supabase 등 관리형 DB는 SSL이
+        // 필요하지만, 자체 호스팅 Docker Postgres(같은 네트워크 내부)는 SSL이 없다.
+        // 운영이라고 무조건 SSL을 켜면 자체 호스팅 DB 연결이 깨지므로 명시적으로 지정.
+        const sslEnabled = configService.get('DB_SSL') === 'true';
 
         // 디버깅 로그
         console.log('=== TypeORM 설정 확인 ===');
@@ -76,11 +80,9 @@ function encodePasswordInUrl(url: string): string {
           synchronize: synchronize, // 기본 false. DB_SYNCHRONIZE=true를 명시해야만 켜짐
           timezone: 'Asia/Seoul', // 한국 시간대 설정
           logging: false, // 로깅 비활성화
-          ssl: nodeEnv === 'production' ? { rejectUnauthorized: false } : false,
+          ssl: sslEnabled ? { rejectUnauthorized: false } : false,
           extra: {
-            ssl: {
-              rejectUnauthorized: false,
-            },
+            ...(sslEnabled ? { ssl: { rejectUnauthorized: false } } : {}),
             // Connection Pool 최적화
             max: 20, // 최대 연결 수
             min: 5, // 최소 유지 연결 수

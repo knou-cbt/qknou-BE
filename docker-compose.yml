@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qknou}
+      POSTGRES_USER: ${POSTGRES_USER:-qknou}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-qknou} -d ${POSTGRES_DB:-qknou}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      # 서버 로컬(pg_dump/백업/점검용)에서만 접근. 외부(0.0.0.0)에는 노출하지 않음.
+      - '127.0.0.1:5432:5432'
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      PORT: 9000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-qknou}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-qknou}
+      DB_SSL: 'false'
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Nginx가 localhost:9000으로 리버스 프록시 (배포 구성안 문서 기준)
+      - '127.0.0.1:9000:9000'
+
+volumes:
+  db_data:

@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+logs
+benchmark-results
+tmp
+docs
+test
+coverage
+*.md
+.env
+.env.*
+!.env.example
+.DS_Store
