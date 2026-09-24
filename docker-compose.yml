@@ -1,40 +1,31 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-qknou}
-      POSTGRES_USER: ${POSTGRES_USER:-qknou}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - db_data:/var/lib/postgresql/data
+      # postgres 이미지가 컨테이너 최초 생성(빈 볼륨) 시 1회만 실행.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-qknou} -d ${POSTGRES_DB:-qknou}']
+      # $$는 compose가 아니라 컨테이너 내부 셸이 확장하도록 이스케이프.
+      # dev/prod 오버레이가 넣어준 POSTGRES_USER/POSTGRES_DB를 그대로 읽음.
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 10s
       timeout: 5s
       retries: 5
-    ports:
-      # 서버 로컬(pg_dump/백업/점검용)에서만 접근. 외부(0.0.0.0)에는 노출하지 않음.
-      - '127.0.0.1:5432:5432'
 
   app:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file:
-      - .env.production
-    environment:
-      NODE_ENV: production
-      PORT: 9000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-qknou}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-qknou}
-      DB_SSL: 'false'
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      # Nginx가 localhost:9000으로 리버스 프록시 (배포 구성안 문서 기준)
-      - '127.0.0.1:9000:9000'
 
-volumes:
-  db_data:
+  web:
+    build:
+      context: ../qknou-FE
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - app

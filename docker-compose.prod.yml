@@ -1,0 +1,35 @@
+# 운영/배포용 오버레이.
+# 사용법: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+services:
+  db:
+    env_file:
+      - .env.production
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      # 서버 로컬(pg_dump/백업/점검용)에서만 접근. 외부(0.0.0.0)에는 노출하지 않음.
+      - '127.0.0.1:5432:5432'
+
+  app:
+    env_file:
+      - .env.production
+    ports:
+      # Nginx가 localhost:9000으로 리버스 프록시 (배포 구성안 문서 기준)
+      - '127.0.0.1:9000:9000'
+
+  web:
+    build:
+      args:
+        # 브라우저가 직접 호출하는 값이라 next build 시점에 번들에 박힘.
+        # 실제 운영 도메인으로 교체 필요 (아래는 자리표시자 기본값).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.qknou.kr}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://www.qknou.kr}
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      API_PROXY_TARGET: http://app:9000
+    ports:
+      - '127.0.0.1:3000:3000'
+
+volumes:
+  db_data:
