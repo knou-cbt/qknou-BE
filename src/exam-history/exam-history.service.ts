@@ -27,16 +27,35 @@ export class ExamHistoryService {
   ) {}
 
   /**
-   * 시험 제출 결과를 풀이 기록으로 누적 저장 (재응시해도 새 기록으로 추가됨).
+   * 시험 제출 결과를 풀이 기록으로 저장. 같은 과목(subject) + 같은 연도(year)의
+   * 기존 기록은 지우고 이번 기록만 남긴다 (마이페이지 히스토리엔 과목-연도 조합당
+   * 최신 응시 결과만 노출됨. 같은 과목이라도 연도가 다른 시험 기록은 유지됨).
    * 채점 자체는 이미 끝난 상태라, 여기서 실패해도 호출부(submitExam)에서
    * 응답 자체를 실패시키지 않도록 try/catch로 감싸서 호출해야 한다.
    */
   async saveAttempt(
     userId: string,
     examId: number,
+    subjectId: number,
+    year: number,
     result: SubmitResultForHistory,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
+      const previousAttempts = await manager
+        .createQueryBuilder(UserExamAttempt, 'attempt')
+        .innerJoin('attempt.exam', 'exam')
+        .where('attempt.user_id = :userId', { userId })
+        .andWhere('exam.subject_id = :subjectId', { subjectId })
+        .andWhere('exam.year = :year', { year })
+        .getMany();
+
+      if (previousAttempts.length > 0) {
+        await manager.delete(
+          UserExamAttempt,
+          previousAttempts.map((a) => a.id),
+        );
+      }
+
       const attempt = manager.create(UserExamAttempt, {
         user_id: userId,
         exam_id: examId,

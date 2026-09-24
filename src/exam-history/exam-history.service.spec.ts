@@ -36,41 +36,80 @@ describe('ExamHistoryService', () => {
   });
 
   describe('saveAttempt', () => {
-    it('기존 기록을 지우지 않고 새 기록을 누적 저장한다', async () => {
-      const mockManager = {
+    function mockManagerWithPreviousAttempts(previousAttempts: any[]) {
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(previousAttempts),
+      };
+      return {
+        createQueryBuilder: jest.fn().mockReturnValue(qb),
+        delete: jest.fn().mockResolvedValue(undefined),
         create: jest.fn((_entity, data) => data),
         save: jest.fn().mockImplementation((entity) => {
           if (!Array.isArray(entity)) entity.id = 100;
           return Promise.resolve(entity);
         }),
+        qb,
       };
+    }
+
+    const sampleResult = {
+      totalQuestions: 2,
+      correctCount: 1,
+      results: [
+        {
+          questionId: 10,
+          questionNumber: 1,
+          userAnswer: 2,
+          correctAnswers: [2],
+          isCorrect: true,
+        },
+        {
+          questionId: 11,
+          questionNumber: 2,
+          userAnswer: 1,
+          correctAnswers: [3],
+          isCorrect: false,
+        },
+      ],
+    };
+
+    it('같은 과목+연도의 기존 기록이 없으면 삭제 없이 새 기록만 저장한다', async () => {
+      const mockManager = mockManagerWithPreviousAttempts([]);
       dataSource.transaction.mockImplementation((cb: any) => cb(mockManager));
 
-      await service.saveAttempt('user-1', 1, {
-        totalQuestions: 2,
-        correctCount: 1,
-        results: [
-          {
-            questionId: 10,
-            questionNumber: 1,
-            userAnswer: 2,
-            correctAnswers: [2],
-            isCorrect: true,
-          },
-          {
-            questionId: 11,
-            questionNumber: 2,
-            userAnswer: 1,
-            correctAnswers: [3],
-            isCorrect: false,
-          },
-        ],
-      });
+      await service.saveAttempt('user-1', 1, 7, 2024, sampleResult);
 
-      // delete가 없어졌는지 확인 (mockManager에 delete 메서드 자체가 없음 → 호출됐으면 TypeError로 실패했을 것)
+      expect(mockManager.qb.andWhere).toHaveBeenCalledWith(
+        'exam.subject_id = :subjectId',
+        { subjectId: 7 },
+      );
+      expect(mockManager.qb.andWhere).toHaveBeenCalledWith(
+        'exam.year = :year',
+        { year: 2024 },
+      );
+      expect(mockManager.delete).not.toHaveBeenCalled();
       expect(mockManager.save).toHaveBeenCalledTimes(2);
       const answersArg = mockManager.save.mock.calls[1][0];
       expect(answersArg).toHaveLength(2);
+    });
+
+    it('같은 과목+연도의 기존 기록이 있으면 지우고 새 기록만 남긴다', async () => {
+      const mockManager = mockManagerWithPreviousAttempts([
+        { id: 50 },
+        { id: 51 },
+      ]);
+      dataSource.transaction.mockImplementation((cb: any) => cb(mockManager));
+
+      await service.saveAttempt('user-1', 1, 7, 2024, sampleResult);
+
+      expect(mockManager.delete).toHaveBeenCalledWith(
+        UserExamAttempt,
+        [50, 51],
+      );
+      expect(mockManager.save).toHaveBeenCalledTimes(2);
     });
   });
 

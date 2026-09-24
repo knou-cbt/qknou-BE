@@ -17,7 +17,7 @@ import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 function getFrontendUrl(): string {
   if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL;
   return process.env.NODE_ENV === 'production'
-    ? 'https://qknou-fe.onrender.com'
+    ? 'https://www.qknou.kr'
     : 'http://localhost:3001';
 }
 
@@ -36,6 +36,7 @@ function getAllowedRedirectOrigins(): string[] {
   return [
     'http://localhost:3000',
     'http://localhost:3001',
+    'https://www.qknou.kr',
     'https://qknou-fe.onrender.com',
   ];
 }
@@ -107,7 +108,7 @@ export class AuthController {
     required: false,
     description:
       '로그인 성공 후 돌아갈 프론트엔드 주소. 허용된 origin(whitelist)일 때만 반영되며, ' +
-      '그 외에는 서버 기본값(FRONTEND_URL)으로 리다이렉트됩니다. 예: https://qknou-fe.onrender.com',
+      '그 외에는 서버 기본값(FRONTEND_URL)으로 리다이렉트됩니다. 예: https://www.qknou.kr',
   })
   @ApiResponse({ status: 302, description: '구글 로그인 페이지로 리다이렉트' })
   async googleAuth(@Query('redirect_uri') _redirectUri?: string) {
@@ -169,7 +170,7 @@ export class AuthController {
     required: false,
     description:
       '로그인 성공 후 돌아갈 프론트엔드 주소. 허용된 origin(whitelist)일 때만 반영되며, ' +
-      '그 외에는 서버 기본값(FRONTEND_URL)으로 리다이렉트됩니다. 예: https://qknou-fe.onrender.com',
+      '그 외에는 서버 기본값(FRONTEND_URL)으로 리다이렉트됩니다. 예: https://www.qknou.kr',
   })
   @ApiResponse({
     status: 302,

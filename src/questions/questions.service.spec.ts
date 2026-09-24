@@ -68,7 +68,12 @@ describe('QuestionsService', () => {
         choices: [],
         correct_answers: [1],
         explanation: null,
-        exam: { id: 10, title: 'exam title', subject: { name: '과목' } },
+        exam: {
+          id: 10,
+          title: 'exam title',
+          year: 2019,
+          subject: { name: '과목' },
+        },
       });
       bookmarksService.isBookmarked.mockResolvedValue(true);
 
@@ -79,6 +84,7 @@ describe('QuestionsService', () => {
       expect(result.exam).toEqual({
         id: 10,
         title: 'exam title',
+        year: 2019,
         subject: '과목',
       });
     });

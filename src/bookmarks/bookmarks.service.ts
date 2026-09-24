@@ -18,10 +18,15 @@ export class BookmarksService {
 
   /**
    * 사용자의 북마크 목록 조회 (최신 등록순)
-   * 문항/시험/과목 정보를 함께 조합해서 반환
+   * 문항/시험/과목 정보를 함께 조합해서 반환.
+   * examTitle은 내부 원본 파일명 형식 문자열이라 화면에 그대로 노출하면 안 되고,
+   * 화면 표시용으로는 subjectName + year + examType(라벨 변환)을 조합해서 써야 한다.
+   *
+   * withDetail=true면 순차 복습(암기모드)에서 매 문항마다 상세 조회를 추가로
+   * 호출하지 않도록 선택지/정답/해설 등 문항 상세 필드까지 함께 내려준다.
    */
-  async findAllByUser(userId: string) {
-    const rows = await this.bookmarkRepository
+  async findAllByUser(userId: string, withDetail = false) {
+    const qb = this.bookmarkRepository
       .createQueryBuilder('bookmark')
       .innerJoin('bookmark.question', 'question')
       .innerJoin('question.exam', 'exam')
@@ -32,12 +37,27 @@ export class BookmarksService {
       .addSelect('question.question_text', 'questionText')
       .addSelect('exam.id', 'examId')
       .addSelect('exam.title', 'examTitle')
+      .addSelect('exam.year', 'year')
+      .addSelect('exam.exam_type', 'examType')
+      .addSelect('subject.id', 'subjectId')
       .addSelect('subject.name', 'subjectName')
       .addSelect('bookmark.created_at', 'bookmarkedAt')
-      .orderBy('bookmark.created_at', 'DESC')
-      .getRawMany();
+      .orderBy('bookmark.created_at', 'DESC');
 
-    return rows;
+    if (withDetail) {
+      qb.addSelect('question.example_text', 'exampleText')
+        .addSelect('question.shared_example', 'sharedExample')
+        .addSelect('question.question_image_urls', 'questionImageUrls')
+        .addSelect(
+          'question.shared_example_image_urls',
+          'sharedExampleImageUrls',
+        )
+        .addSelect('question.choices', 'choices')
+        .addSelect('question.correct_answers', 'correctAnswers')
+        .addSelect('question.explanation', 'explanation');
+    }
+
+    return qb.getRawMany();
   }
 
   /**
