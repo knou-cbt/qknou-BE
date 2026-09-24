@@ -26,7 +26,9 @@ async function bootstrap() {
     console.error('');
     console.error('예시:');
     console.error('  yarn crawl https://allaclass.tistory.com/855');
-    console.error('  yarn crawl https://allaclass.tistory.com/855 --no-answers  # 정답 저장 생략');
+    console.error(
+      '  yarn crawl https://allaclass.tistory.com/855 --no-answers  # 정답 저장 생략',
+    );
     console.error(
       '  yarn crawl https://allaclass.tistory.com/2365 --all --delay=2000',
     );
@@ -53,7 +55,13 @@ async function bootstrap() {
       console.log('');
 
       if (grade) console.log(`📝 --grade: 시험 title에 "${grade}" 표시`);
-      await crawler.crawlAll(url, { forceRetry, delay, startIndex, skipAnswers, grade });
+      await crawler.crawlAll(url, {
+        forceRetry,
+        delay,
+        startIndex,
+        skipAnswers,
+        grade,
+      });
     } else {
       console.log(`🔍 단일 크롤링 시작: ${url}`);
       if (forceRetry) console.log('⚠️  --retry 활성화');
@@ -61,7 +69,12 @@ async function bootstrap() {
       if (grade) console.log(`📝 --grade: 과목명 → "${grade}"`);
       console.log('');
 
-      const result = await crawler.crawlExam(url, forceRetry, skipAnswers, grade);
+      const result = await crawler.crawlExam(
+        url,
+        forceRetry,
+        skipAnswers,
+        grade,
+      );
 
       console.log('');
       console.log('✅ 크롤링 완료!');

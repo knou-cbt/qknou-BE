@@ -29,6 +29,7 @@ interface IntentResult {
 @Injectable()
 export class TutorService {
   private openai: OpenAI;
+  private readonly useVllm: boolean;
   private readonly logger = new Logger(TutorService.name);
 
   constructor(
@@ -42,17 +43,53 @@ export class TutorService {
     @InjectRepository(UserChatLimit)
     private chatLimitRepository: Repository<UserChatLimit>,
   ) {
-    const apiKey = this.configService.get<string>('OPENAI_API_KEY');
-    this.openai = new OpenAI({ apiKey });
+    // VLLM_URL이 설정되어 있으면 자체 호스팅 vLLM을 사용하고,
+    // 없으면 기존처럼 OpenAI를 사용한다. GPT로 되돌리려면 VLLM_URL만 지우면 됨.
+    const vllmUrl = this.configService.get<string>('VLLM_URL');
+    this.useVllm = !!vllmUrl;
+
+    const apiKey = this.useVllm
+      ? this.configService.get<string>('VLLM_API_KEY') || 'not-needed'
+      : this.configService.get<string>('OPENAI_API_KEY');
+
+    this.openai = new OpenAI({
+      apiKey,
+      ...(this.useVllm ? { baseURL: vllmUrl } : {}),
+    });
+
+    if (this.useVllm) {
+      this.logger.log(`AI 튜터: vLLM 사용 (${vllmUrl})`);
+    }
   }
 
   private get model(): string {
+    if (this.useVllm) {
+      return (
+        this.configService.get<string>('VLLM_MODEL') ||
+        this.configService.get<string>('OPENAI_MODEL') ||
+        ''
+      );
+    }
     return this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
   }
 
   private formatChoices(choices: any): string {
     if (!choices || !Array.isArray(choices)) return '';
     return choices.map((c: any) => `${c.number}번: ${c.text}`).join('\n');
+  }
+
+  // vLLM(Qwen 등 reasoning 모델)은 기본적으로 답변 전에 긴 thinking을
+  // reasoning 필드에 먼저 생성한다. 튜터 응답엔 필요 없고 지연/토큰만
+  // 늘리므로, vLLM 사용 시에만 thinking을 꺼서 호출한다.
+  private createChatCompletion(
+    params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+  ) {
+    return this.openai.chat.completions.create({
+      ...params,
+      ...(this.useVllm
+        ? ({ chat_template_kwargs: { enable_thinking: false } } as any)
+        : {}),
+    });
   }
 
   // ──────────────────────────────────────────────
@@ -75,7 +112,7 @@ ${this.formatChoices(question.choices)}
     try {
       this.logger.log(`문제 ID ${question.id} 해설 생성 요청 시작`);
 
-      const response = await this.openai.chat.completions.create({
+      const response = await this.createChatCompletion({
         model: this.model,
         messages: [
           { role: 'system', content: systemPrompt },
@@ -140,7 +177,7 @@ term_candidates 규칙:
 - 질문에서 핵심 개념이 없으면 빈 배열`;
 
     try {
-      const response = await this.openai.chat.completions.create({
+      const response = await this.createChatCompletion({
         model: this.model,
         messages: [
           { role: 'system', content: systemPrompt },
@@ -230,7 +267,7 @@ term_candidates 규칙:
     const userPrompt = `"${term}" 개념에 대해 설명해주세요.`;
 
     try {
-      const response = await this.openai.chat.completions.create({
+      const response = await this.createChatCompletion({
         model: this.model,
         messages: [
           { role: 'system', content: systemPrompt },
@@ -268,7 +305,7 @@ term_candidates 규칙:
     const userPrompt = `다음 개념들을 비교하여 설명해주세요: ${terms.join(', ')}`;
 
     try {
-      const response = await this.openai.chat.completions.create({
+      const response = await this.createChatCompletion({
         model: this.model,
         messages: [
           { role: 'system', content: systemPrompt },
@@ -388,7 +425,7 @@ term_candidates 규칙:
     ];
 
     try {
-      const response = await this.openai.chat.completions.create({
+      const response = await this.createChatCompletion({
         model: this.model,
         messages,
         temperature: 0.7,

@@ -1,15 +1,88 @@
-import { Controller, Get, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  ExecutionContext,
+  Get,
+  Injectable,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 
-/** OAuth 로그인 성공 후 리다이렉트할 프론트엔드 URL (환경 변수 또는 NODE_ENV 기반) */
+/** OAuth 로그인 성공 후 리다이렉트할 프론트엔드 기본 URL (환경 변수 또는 NODE_ENV 기반) */
 function getFrontendUrl(): string {
   if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL;
   return process.env.NODE_ENV === 'production'
     ? 'https://www.qknou.kr'
     : 'http://localhost:3001';
+}
+
+/**
+ * /auth/google, /auth/kakao 의 redirect_uri로 허용할 프론트엔드 origin 목록.
+ * ALLOWED_REDIRECT_ORIGINS 환경변수(콤마 구분)로 오버라이드 가능.
+ */
+function getAllowedRedirectOrigins(): string[] {
+  const fromEnv = process.env.ALLOWED_REDIRECT_ORIGINS;
+  if (fromEnv) {
+    return fromEnv
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+  }
+  return [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'https://www.qknou.kr',
+    'https://qknou-fe.onrender.com',
+  ];
+}
+
+/**
+ * redirect_uri로 들어온 값이 허용된 프론트엔드 origin인지 검증한다.
+ * 검증 없이 그대로 리다이렉트하면 open redirect(토큰 탈취)로 이어지므로,
+ * 반드시 whitelist에 있는 origin만 통과시킨다.
+ */
+function resolveAllowedOrigin(redirectUri: unknown): string | null {
+  if (typeof redirectUri !== 'string' || !redirectUri) return null;
+  let origin: string;
+  try {
+    origin = new URL(redirectUri).origin;
+  } catch {
+    return null;
+  }
+  return getAllowedRedirectOrigins().includes(origin) ? origin : null;
+}
+
+/** 콜백에서 state(=로그인 시작 시 검증된 redirect_uri)로 최종 리다이렉트 origin을 결정한다. */
+function resolveFrontendOrigin(state: unknown): string {
+  return resolveAllowedOrigin(state) ?? getFrontendUrl();
+}
+
+/**
+ * redirect_uri 쿼리 파라미터를 whitelist 검증 후 OAuth state로 실어 보내는 가드.
+ * @nestjs/passport의 AuthGuard는 요청별 옵션을 기본 지원하지 않으므로
+ * getAuthenticateOptions를 오버라이드해서 state를 주입한다.
+ */
+@Injectable()
+class GoogleAuthGuard extends AuthGuard('google') {
+  getAuthenticateOptions(context: ExecutionContext) {
+    const req = context.switchToHttp().getRequest();
+    const origin = resolveAllowedOrigin(req.query?.redirect_uri);
+    return origin ? { state: origin } : {};
+  }
+}
+
+@Injectable()
+class KakaoAuthGuard extends AuthGuard('kakao') {
+  getAuthenticateOptions(context: ExecutionContext) {
+    const req = context.switchToHttp().getRequest();
+    const origin = resolveAllowedOrigin(req.query?.redirect_uri);
+    return origin ? { state: origin } : {};
+  }
 }
 
 @ApiTags('auth')
@@ -24,15 +97,23 @@ export class AuthController {
    * 구글 로그인 시작점
    */
   @Get('google')
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleAuthGuard)
   @ApiOperation({
     summary: '구글 로그인 시작',
     description:
       '구글 OAuth 로그인 페이지로 리다이렉트합니다. Swagger에서는 테스트 불가, 브라우저에서 직접 접속하세요.',
   })
+  @ApiQuery({
+    name: 'redirect_uri',
+    required: false,
+    description:
+      '로그인 성공 후 돌아갈 프론트엔드 주소. 허용된 origin(whitelist)일 때만 반영되며, ' +
+      '그 외에는 서버 기본값(FRONTEND_URL)으로 리다이렉트됩니다. 예: https://www.qknou.kr',
+  })
   @ApiResponse({ status: 302, description: '구글 로그인 페이지로 리다이렉트' })
-  async googleAuth() {
-    // Guard가 자동으로 구글 로그인 페이지로 리다이렉트
+  async googleAuth(@Query('redirect_uri') _redirectUri?: string) {
+    // GoogleAuthGuard가 redirect_uri를 검증해 state로 실어 보내고,
+    // 자동으로 구글 로그인 페이지로 리다이렉트함
   }
 
   /**
@@ -66,7 +147,9 @@ export class AuthController {
     const { access_token } = await this.authService.login(req.user);
 
     // 프론트엔드로 리다이렉트하면서 토큰을 쿼리 파라미터로 전달
-    res.redirect(`${getFrontendUrl()}/auth/success?token=${access_token}`);
+    // state에는 /auth/google 호출 시 검증된 redirect_uri origin이 실려 있음 (없으면 기본값)
+    const frontendOrigin = resolveFrontendOrigin(req.query?.state);
+    res.redirect(`${frontendOrigin}/auth/success?token=${access_token}`);
   }
 
   // ========== 카카오 로그인 ==========
@@ -76,15 +159,26 @@ export class AuthController {
    * 카카오 로그인 시작점
    */
   @Get('kakao')
-  @UseGuards(AuthGuard('kakao'))
+  @UseGuards(KakaoAuthGuard)
   @ApiOperation({
     summary: '카카오 로그인 시작',
     description:
       '카카오 OAuth 로그인 페이지로 리다이렉트합니다. Swagger에서는 테스트 불가, 브라우저에서 직접 접속하세요.',
   })
-  @ApiResponse({ status: 302, description: '카카오 로그인 페이지로 리다이렉트' })
-  async kakaoAuth() {
-    // Guard가 자동으로 카카오 로그인 페이지로 리다이렉트
+  @ApiQuery({
+    name: 'redirect_uri',
+    required: false,
+    description:
+      '로그인 성공 후 돌아갈 프론트엔드 주소. 허용된 origin(whitelist)일 때만 반영되며, ' +
+      '그 외에는 서버 기본값(FRONTEND_URL)으로 리다이렉트됩니다. 예: https://www.qknou.kr',
+  })
+  @ApiResponse({
+    status: 302,
+    description: '카카오 로그인 페이지로 리다이렉트',
+  })
+  async kakaoAuth(@Query('redirect_uri') _redirectUri?: string) {
+    // KakaoAuthGuard가 redirect_uri를 검증해 state로 실어 보내고,
+    // 자동으로 카카오 로그인 페이지로 리다이렉트함
   }
 
   /**
@@ -103,7 +197,8 @@ export class AuthController {
   })
   async kakaoAuthCallback(@Req() req, @Res() res: Response) {
     const { access_token } = await this.authService.login(req.user);
-    res.redirect(`${getFrontendUrl()}/auth/success?token=${access_token}`);
+    const frontendOrigin = resolveFrontendOrigin(req.query?.state);
+    res.redirect(`${frontendOrigin}/auth/success?token=${access_token}`);
   }
 
   // ========== 테스트용 엔드포인트 ==========
@@ -117,7 +212,8 @@ export class AuthController {
   @UseGuards(AuthGuard('jwt'))
   @ApiOperation({
     summary: '현재 사용자 조회 (JWT 인증 테스트)',
-    description: 'JWT 토큰이 유효한지 테스트하고 현재 로그인한 사용자 정보를 반환합니다.',
+    description:
+      'JWT 토큰이 유효한지 테스트하고 현재 로그인한 사용자 정보를 반환합니다.',
   })
   @ApiResponse({
     status: 200,

@@ -5,6 +5,10 @@
   "author": "",
   "private": true,
   "license": "UNLICENSED",
+  "resolutions": {
+    "protobufjs": "^7.5.5",
+    "handlebars": "^4.7.9"
+  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -52,6 +56,7 @@
     "@sentry/profiling-node": "^10.53.1",
     "@supabase/supabase-js": "^2.90.1",
     "axios": "^1.13.2",
+    "bcryptjs": "^3.0.3",
     "cheerio": "^1.1.2",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
@@ -72,10 +77,12 @@
     "@nestjs/cli": "^10.0.0",
     "@nestjs/schematics": "^10.0.0",
     "@nestjs/testing": "^10.0.0",
+    "@types/bcryptjs": "^2.4.6",
     "@types/cheerio": "^1.0.0",
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.18.2",
     "@types/jest": "^29.5.2",
+    "@types/multer": "^2.2.0",
     "@types/node": "^20.3.1",
     "@types/passport-google-oauth20": "^2.0.17",
     "@types/passport-jwt": "^4.0.1",
@@ -106,6 +113,9 @@
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "moduleNameMapper": {
+      "^src/(.*)$": "<rootDir>/$1"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

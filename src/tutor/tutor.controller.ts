@@ -24,6 +24,7 @@ import {
 } from '@nestjs/swagger';
 import { TutorChatDto } from './dto/chat.dto';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { AdminGuard } from 'src/auth/guards/admin.guard';
 import { ChatLimitGuard } from './guards/chat-limit.guard';
 
 @ApiTags('tutor')
@@ -161,7 +162,7 @@ export class TutorController {
   }
 
   @Delete('cleanup')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '오래된 챗봇 사용 데이터 삭제 (관리자용)',

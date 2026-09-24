@@ -20,19 +20,28 @@ async function bootstrap() {
 
   if (!isBulk && !isSingle) {
     console.error('사용법:');
-    console.error('  단건: yarn ts-node src/scripts/clear-explanation.ts <question_id>');
-    console.error('  일괄: yarn ts-node src/scripts/clear-explanation.ts --subject "C++ 프로그래밍" --year 2013');
+    console.error(
+      '  단건: yarn ts-node src/scripts/clear-explanation.ts <question_id>',
+    );
+    console.error(
+      '  일괄: yarn ts-node src/scripts/clear-explanation.ts --subject "C++ 프로그래밍" --year 2013',
+    );
     process.exit(1);
   }
 
   const app = await NestFactory.createApplicationContext(AppModule);
 
   try {
-    const questionRepo = app.get<Repository<Questsion>>(getRepositoryToken(Questsion));
+    const questionRepo = app.get<Repository<Questsion>>(
+      getRepositoryToken(Questsion),
+    );
 
     if (isSingle) {
       const questionId = parseInt(args[0]);
-      await questionRepo.update(questionId, { explanation: null as any, concept_tags: [] });
+      await questionRepo.update(questionId, {
+        explanation: null as any,
+        concept_tags: [],
+      });
       console.log(`✅ 문제 ID ${questionId} 해설 삭제 완료`);
     } else {
       const subjectName = args[subjectIndex + 1];
@@ -59,7 +68,9 @@ async function bootstrap() {
           .set({ explanation: null as any, concept_tags: [] })
           .where('exam_id = :examId', { examId: exam.id })
           .execute();
-        console.log(`✅ [${exam.title}] 문제 ${result.affected}개 해설 삭제 완료`);
+        console.log(
+          `✅ [${exam.title}] 문제 ${result.affected}개 해설 삭제 완료`,
+        );
       }
     }
   } catch (error: any) {
