@@ -30,6 +30,10 @@ services:
       args:
         NEXT_PUBLIC_API_URL: https://api.qknou.kr
         NEXT_PUBLIC_SITE_URL: https://www.qknou.kr
+        # Next.js의 rewrites()는 next build 시점에 routes-manifest.json에 고정됨
+        # — 런타임 environment: 값만으로는 안 먹고, 빌드 타임 ARG로도 넣어줘야 함.
+        # (프론트 Dockerfile도 이 ARG를 받아서 ENV로 넘기도록 되어있어야 함)
+        API_PROXY_TARGET: http://app:9000
     restart: unless-stopped
     environment:
       NODE_ENV: production
