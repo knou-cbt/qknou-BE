@@ -51,7 +51,7 @@ AI 기능은 크게 두 가지로 구성한다.
 | Method | URL | 설명 |
 | --- | --- | --- |
 | GET | /api/tutor/questions/:id/explanation | 해설 조회 (없으면 생성) |
-| POST | /api/tutor/questions/:id/explanation/regenerate | 해설 강제 재생성 |
+| POST | /api/tutor/questions/:id/explanation/regenerate | 해설 강제 재생성 (관리자 전용) |
 
 ### concept_tags 추출 프롬프트 핵심 규칙
 

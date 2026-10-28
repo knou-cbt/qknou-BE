@@ -5,15 +5,15 @@
 | 번호 | 구분 | 설명 |
 | --- | --- | --- |
 | 1~5 | Auth | 구글 로그인 시작/콜백, 카카오 로그인 시작/콜백, 현재 사용자 조회(JWT) |
-| 6 | Users | 회원 생성 |
+| 6 | Users | ~~회원 생성~~ (제거됨 — 회원은 OAuth 로그인으로만 생성) |
 | 7~9 | 과목 | 목록 조회, 상세 조회, 과목별 시험 목록 |
 | 10~11 | 시험 | 문제 조회, 제출(채점) |
 | 12~13 | 학과 | 목록 조회, 학과별 과목 목록 |
-| 14~15 | Tutor | 문제 해설 조회/생성, 해설 재생성 |
+| 14~15 | Tutor | 문제 해설 조회/생성, 해설 재생성 (관리자용) |
 | 16 | Tutor | AI 튜터 챗봇 (로그인 필수, 일 5회 제한) |
 | 17 | Tutor | 남은 챗봇 사용 횟수 조회 |
 | 18 | Tutor | 오래된 챗봇 사용 데이터 삭제 (관리자용) |
-| 19~21 | Health | 서버 상태, 성능 측정, DB 연결 |
+| 19~21 | Health | 서버 상태, 성능 측정 (관리자용), DB 연결 (관리자용) |
 | 22 | 피드백 | 피드백 제출 (GitHub Issue 자동 생성) |
 | 23~28 | 시험지 등록 | 업로드(중복 검증 내부 처리), 관리자 검수/수정/게시/반려 |
 | 29~31 | 업데이트 알림 | 활성 공지 조회, 내역 적재(관리자), 공지 발행(관리자) |
@@ -147,31 +147,9 @@
 
 ---
 
-## 6. Users - 회원 생성
+## 6. Users - 회원 생성 (제거됨)
 
-### **기본 정보**
-
-| 항목 | 내용 |
-| --- | --- |
-| **Method** | POST |
-| **URL** | /users |
-| **설명** | 사용자(회원) 생성. |
-
-**Request - Body (JSON)**
-
-| key | 설명 | value 타입 | 옵션 | Nullable |
-| --- | --- | --- | --- | --- |
-| (CreateUserDto) | 요청 body (현재 스키마는 비어 있음) | object | - | - |
-
-**Response**  
-서비스에서 반환하는 생성 결과 객체
-
-**Status**
-
-| status | response content |
-| --- | --- |
-| 201 | 생성 성공 |
-| 400 | 잘못된 요청 |
+`POST /users`는 인증 없이 열려 있었고 실제로 쓰는 곳이 없어 제거했습니다. 회원은 구글/카카오 로그인 콜백에서만 생성됩니다.
 
 ---
 
@@ -643,6 +621,7 @@ function ExampleText({ text }: { text: string }) {
 | **Method** | POST |
 | **URL** | /api/tutor/questions/:id/explanation/regenerate |
 | **설명** | 특정 문제의 해설을 AI로 강제 재생성하여 DB에 덮어씁니다. concept_tags도 함께 재생성됩니다. |
+| **인증** | 관리자 JWT 필수 (`Authorization: Bearer <token>`). 비로그인 401, 일반 사용자 403 |
 
 **Request - Path parameter**
 
@@ -921,6 +900,7 @@ function ExampleText({ text }: { text: string }) {
 | **Method** | GET |
 | **URL** | /api/health/performance |
 | **설명** | DB ping, 과목/시험/문제 조회 등 실제 API 성능을 측정한 결과를 반환합니다. |
+| **인증** | 관리자 JWT 필수. 비로그인 401, 일반 사용자 403 |
 
 **Response**
 
@@ -950,6 +930,7 @@ function ExampleText({ text }: { text: string }) {
 | **Method** | GET |
 | **URL** | /api/health/db |
 | **설명** | DB 연결 상태 확인. SELECT NOW() 실행 후 결과 반환. |
+| **인증** | 관리자 JWT 필수. 비로그인 401, 일반 사용자 403 |
 
 **Response**
 

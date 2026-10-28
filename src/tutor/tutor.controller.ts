@@ -69,13 +69,17 @@ export class TutorController {
   }
 
   @Post('questions/:id/explanation/regenerate')
+  // 기존 해설을 덮어쓰고 LLM을 호출하므로 관리자 전용 (이전엔 인증 없이 열려 있었음)
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '특정 문제 해설 재생성',
     description:
-      '기존 해설을 AI 모델을 통해 강제로 다시 생성하여 덮어씁니다. concept_tags도 함께 재생성됩니다.',
+      '기존 해설을 AI 모델을 통해 강제로 다시 생성하여 덮어씁니다. concept_tags도 함께 재생성됩니다. 관리자 전용.',
   })
   @ApiParam({ name: 'id', description: '문제 ID', type: Number })
   @ApiResponse({ status: 201, description: '해설 재생성 성공' })
+  @ApiResponse({ status: 403, description: '관리자 권한 필요' })
   async regenerateExplanation(@Param('id', ParseIntPipe) id: number) {
     const question = await this.questionRepository.findOne({ where: { id } });
     if (!question) {

@@ -1,8 +1,15 @@
-import { Controller, Get } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Controller, Get, UseGuards } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { DataSource } from 'typeorm';
 import { ExamsService } from '../exams/exams.service';
 import { SubjectsService } from '../subjects/subjects.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../auth/guards/admin.guard';
 
 @ApiTags('health')
 @Controller('api/health')
@@ -32,6 +39,9 @@ export class HealthController {
    * 운영 서버에서 실제 성능을 측정합니다.
    */
   @Get('performance')
+  // 실제 쿼리를 여러 번 돌려서 외부에 열어두면 부하 유발 수단이 됨 → 관리자 전용
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '성능 측정',
     description:
@@ -146,6 +156,9 @@ export class HealthController {
    * DB 연결 상태 확인
    */
   @Get('db')
+  // DB 드라이버/DB명/에러 메시지가 노출되므로 관리자 전용
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'DB 연결 상태 확인' })
   @ApiResponse({ status: 200, description: 'DB 연결 정상' })
   async checkDatabase() {
