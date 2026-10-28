@@ -1,8 +1,10 @@
 import {
+  HttpException,
   Injectable,
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
@@ -15,6 +17,15 @@ import { Exam } from 'src/exams/entities/exam.entity';
 import { UserChatLimit } from './entities/chat-limit.entity';
 
 const PROMPT_VERSION = 'v1';
+
+// LLM 호출 1건 타임아웃/재시도. 기본값(10분, 2회 재시도)이면 응답 없는 LLM 서버에
+// 요청이 수십 분씩 매달려 커넥션·메모리를 잡아먹는다.
+const DEFAULT_LLM_TIMEOUT_MS = 30_000;
+const DEFAULT_LLM_MAX_RETRIES = 1;
+// 동시에 LLM으로 나가는 요청 수 상한과, 그걸 넘었을 때 대기열 길이.
+// 대기열까지 차면 즉시 503으로 돌려보내 서버가 밀린 요청을 쌓아두지 않게 함.
+const DEFAULT_LLM_MAX_CONCURRENCY = 5;
+const DEFAULT_LLM_MAX_QUEUE = 20;
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -31,6 +42,15 @@ export class TutorService {
   private openai: OpenAI;
   private readonly useVllm: boolean;
   private readonly logger = new Logger(TutorService.name);
+  private readonly llmMaxConcurrency: number;
+  private readonly llmMaxQueue: number;
+  private llmActiveCount = 0;
+  private readonly llmWaiters: (() => void)[] = [];
+  // 해설 없는 문제를 여러 사용자가 동시에 열면 같은 해설을 N번 생성하던 것을 1번으로 합침
+  private readonly explanationInFlight = new Map<
+    number,
+    Promise<{ explanation: string; conceptTags: string[] }>
+  >();
 
   constructor(
     private configService: ConfigService,
@@ -55,7 +75,20 @@ export class TutorService {
     this.openai = new OpenAI({
       apiKey,
       ...(this.useVllm ? { baseURL: vllmUrl } : {}),
+      timeout: Number(
+        this.configService.get('LLM_TIMEOUT_MS') ?? DEFAULT_LLM_TIMEOUT_MS,
+      ),
+      maxRetries: Number(
+        this.configService.get('LLM_MAX_RETRIES') ?? DEFAULT_LLM_MAX_RETRIES,
+      ),
     });
+    this.llmMaxConcurrency = Number(
+      this.configService.get('LLM_MAX_CONCURRENCY') ??
+        DEFAULT_LLM_MAX_CONCURRENCY,
+    );
+    this.llmMaxQueue = Number(
+      this.configService.get('LLM_MAX_QUEUE') ?? DEFAULT_LLM_MAX_QUEUE,
+    );
 
     if (this.useVllm) {
       this.logger.log(`AI 튜터: vLLM 사용 (${vllmUrl})`);
@@ -81,15 +114,46 @@ export class TutorService {
   // vLLM(Qwen 등 reasoning 모델)은 기본적으로 답변 전에 긴 thinking을
   // reasoning 필드에 먼저 생성한다. 튜터 응답엔 필요 없고 지연/토큰만
   // 늘리므로, vLLM 사용 시에만 thinking을 꺼서 호출한다.
-  private createChatCompletion(
+  private async createChatCompletion(
     params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
   ) {
-    return this.openai.chat.completions.create({
-      ...params,
-      ...(this.useVllm
-        ? ({ chat_template_kwargs: { enable_thinking: false } } as any)
-        : {}),
-    });
+    await this.acquireLlmSlot();
+    try {
+      return await this.openai.chat.completions.create({
+        ...params,
+        ...(this.useVllm
+          ? ({ chat_template_kwargs: { enable_thinking: false } } as any)
+          : {}),
+      });
+    } finally {
+      this.releaseLlmSlot();
+    }
+  }
+
+  private async acquireLlmSlot(): Promise<void> {
+    if (this.llmActiveCount < this.llmMaxConcurrency) {
+      this.llmActiveCount++;
+      return;
+    }
+    if (this.llmWaiters.length >= this.llmMaxQueue) {
+      this.logger.warn(
+        `LLM 요청 대기열 초과 (동시 ${this.llmActiveCount}, 대기 ${this.llmWaiters.length})`,
+      );
+      throw new ServiceUnavailableException(
+        'AI 튜터 요청이 많아 처리하지 못했습니다. 잠시 후 다시 시도해주세요.',
+      );
+    }
+    // 슬롯은 releaseLlmSlot에서 대기자에게 그대로 넘겨지므로 여기서 카운트를 올리지 않음
+    await new Promise<void>((resolve) => this.llmWaiters.push(resolve));
+  }
+
+  private releaseLlmSlot(): void {
+    const next = this.llmWaiters.shift();
+    if (next) {
+      next();
+    } else {
+      this.llmActiveCount--;
+    }
   }
 
   // ──────────────────────────────────────────────
@@ -97,6 +161,19 @@ export class TutorService {
   // ──────────────────────────────────────────────
 
   async generateExplanation(
+    question: Questsion,
+  ): Promise<{ explanation: string; conceptTags: string[] }> {
+    const pending = this.explanationInFlight.get(question.id);
+    if (pending) return pending;
+
+    const task = this.generateAndSaveExplanation(question).finally(() =>
+      this.explanationInFlight.delete(question.id),
+    );
+    this.explanationInFlight.set(question.id, task);
+    return task;
+  }
+
+  private async generateAndSaveExplanation(
     question: Questsion,
   ): Promise<{ explanation: string; conceptTags: string[] }> {
     const systemPrompt = `KNOU 기출문제 해설 생성. JSON만 출력.
@@ -141,6 +218,7 @@ ${this.formatChoices(question.choices)}
 
       return { explanation, conceptTags };
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       this.logger.error(
         `해설 생성 중 오류 발생 (문제 ID: ${question.id}):`,
         error,
