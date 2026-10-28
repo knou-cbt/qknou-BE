@@ -11,6 +11,7 @@ import {
   Query,
   Delete,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { TutorService } from './tutor.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
@@ -37,6 +38,8 @@ export class TutorController {
   ) {}
 
   @Get('questions/:id/explanation')
+  // 해설이 없으면 LLM을 호출하는 공개 엔드포인트 → 전역보다 낮게 제한
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: '특정 문제 해설 조회 및 생성',
     description:
@@ -97,6 +100,8 @@ export class TutorController {
 
   @Post('chat')
   @UseGuards(JwtAuthGuard, ChatLimitGuard)
+  // 일일 횟수 제한(ChatLimitGuard)과 별개로 짧은 시간 연타 방지
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'AI 튜터 챗봇 (로그인 필수, 일 5회 제한)',

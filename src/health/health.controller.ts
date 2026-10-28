@@ -1,4 +1,5 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -24,6 +25,8 @@ export class HealthController {
    * 기본 Health Check
    */
   @Get()
+  // Docker HEALTHCHECK/모니터링이 주기적으로 호출하므로 요청 제한에서 제외
+  @SkipThrottle()
   @ApiOperation({ summary: '서버 상태 확인' })
   @ApiResponse({ status: 200, description: '서버 정상 작동' })
   async healthCheck() {
