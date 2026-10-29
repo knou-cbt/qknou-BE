@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 import { AppController } from './app.controller';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -49,6 +50,19 @@ function encodePasswordInUrl(url: string): string {
       envFilePath: [`.env.${process.env.NODE_ENV || 'development'}`, '.env'],
     }),
     ScheduleModule.forRoot(),
+    // IP 기준 전역 요청 제한. 기본 분당 120회 — 일반 사용(문제 풀이/페이지 이동)은
+    // 넉넉히 통과하고 스크립트성 대량 호출만 막는 수준. LLM 호출·로그인 등 비싼/민감한
+    // 엔드포인트는 각 컨트롤러에서 @Throttle로 더 낮게 덮어씀.
+    // 메모리 저장소라 인스턴스별로 따로 센다(현재 단일 인스턴스 기준).
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => [
+        {
+          ttl: Number(configService.get('RATE_LIMIT_TTL_MS') ?? 60_000),
+          limit: Number(configService.get('RATE_LIMIT_MAX') ?? 120),
+        },
+      ],
+    }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
@@ -59,6 +73,12 @@ function encodePasswordInUrl(url: string): string {
         // 운영 스키마를 건드릴 뻔함). 기본값은 항상 false, 진짜 필요할 때만
         // DB_SYNCHRONIZE=true를 명시적으로 켜도록 분리.
         const synchronize = configService.get('DB_SYNCHRONIZE') === 'true';
+        // SSL도 NODE_ENV 기준으로 자동 판단하지 않는다 — Supabase 등 관리형 DB는 SSL이
+        // 필요하지만, 자체 호스팅 Docker Postgres(같은 네트워크 내부)는 SSL이 없다.
+        // 운영이라고 무조건 SSL을 켜면 자체 호스팅 DB 연결이 깨지므로 명시적으로 지정.
+        // 미설정 시에는 기존 동작(항상 SSL, Supabase 기준)을 유지하고,
+        // 자체 호스팅 DB에서만 DB_SSL=false로 끈다.
+        const sslEnabled = configService.get('DB_SSL') !== 'false';
 
         // 디버깅 로그
         console.log('=== TypeORM 설정 확인 ===');
@@ -76,11 +96,9 @@ function encodePasswordInUrl(url: string): string {
           synchronize: synchronize, // 기본 false. DB_SYNCHRONIZE=true를 명시해야만 켜짐
           timezone: 'Asia/Seoul', // 한국 시간대 설정
           logging: false, // 로깅 비활성화
-          ssl: nodeEnv === 'production' ? { rejectUnauthorized: false } : false,
+          ssl: sslEnabled ? { rejectUnauthorized: false } : false,
           extra: {
-            ssl: {
-              rejectUnauthorized: false,
-            },
+            ...(sslEnabled ? { ssl: { rejectUnauthorized: false } } : {}),
             // Connection Pool 최적화
             max: 20, // 최대 연결 수
             min: 5, // 최소 유지 연결 수
@@ -111,6 +129,10 @@ function encodePasswordInUrl(url: string): string {
     {
       provide: APP_FILTER,
       useClass: SentryGlobalFilter,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
     },
   ],
 })

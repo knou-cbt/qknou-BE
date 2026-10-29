@@ -11,6 +11,7 @@ import {
   Query,
   Delete,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { TutorService } from './tutor.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
@@ -37,6 +38,8 @@ export class TutorController {
   ) {}
 
   @Get('questions/:id/explanation')
+  // 해설이 없으면 LLM을 호출하는 공개 엔드포인트 → 전역보다 낮게 제한
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: '특정 문제 해설 조회 및 생성',
     description:
@@ -69,13 +72,17 @@ export class TutorController {
   }
 
   @Post('questions/:id/explanation/regenerate')
+  // 기존 해설을 덮어쓰고 LLM을 호출하므로 관리자 전용 (이전엔 인증 없이 열려 있었음)
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '특정 문제 해설 재생성',
     description:
-      '기존 해설을 AI 모델을 통해 강제로 다시 생성하여 덮어씁니다. concept_tags도 함께 재생성됩니다.',
+      '기존 해설을 AI 모델을 통해 강제로 다시 생성하여 덮어씁니다. concept_tags도 함께 재생성됩니다. 관리자 전용.',
   })
   @ApiParam({ name: 'id', description: '문제 ID', type: Number })
   @ApiResponse({ status: 201, description: '해설 재생성 성공' })
+  @ApiResponse({ status: 403, description: '관리자 권한 필요' })
   async regenerateExplanation(@Param('id', ParseIntPipe) id: number) {
     const question = await this.questionRepository.findOne({ where: { id } });
     if (!question) {
@@ -93,6 +100,8 @@ export class TutorController {
 
   @Post('chat')
   @UseGuards(JwtAuthGuard, ChatLimitGuard)
+  // 일일 횟수 제한(ChatLimitGuard)과 별개로 짧은 시간 연타 방지
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'AI 튜터 챗봇 (로그인 필수, 일 5회 제한)',
