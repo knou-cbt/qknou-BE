@@ -1,0 +1,44 @@
+# 로컬 개발용 오버레이.
+# 사용법: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# db는 운영/Supabase dev DB와 완전히 격리된 로컬 전용 컨테이너.
+# app은 .env.development를 그대로 불러오되(OAuth/JWT/OPENAI 등 공유 값),
+# DATABASE_URL/DB_SSL/DB_SYNCHRONIZE만 이 파일에서 로컬 db 컨테이너로 덮어씀 —
+# .env.development 자체는 건드리지 않으므로 Docker 없이 `yarn start:dev`로
+# 돌리는 기존 방식은 그대로 Supabase dev DB를 계속 사용함.
+services:
+  db:
+    environment:
+      POSTGRES_DB: qknou_dev
+      POSTGRES_USER: qknou
+      POSTGRES_PASSWORD: devlocal1234
+    volumes:
+      - db_data_dev:/var/lib/postgresql/data
+    ports:
+      - '127.0.0.1:5432:5432'
+
+  app:
+    env_file:
+      - .env.development
+    environment:
+      DATABASE_URL: postgresql://qknou:devlocal1234@db:5432/qknou_dev
+      DB_SSL: 'false'
+      # 컨테이너 db는 매번 빈 상태로 시작하므로 로컬에서만 편의상 자동 동기화.
+      DB_SYNCHRONIZE: 'true'
+    ports:
+      - '127.0.0.1:3001:3001'
+
+  web:
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3001
+        NEXT_PUBLIC_SITE_URL: http://localhost:3000
+    environment:
+      NODE_ENV: development
+      PORT: '3000'
+      API_PROXY_TARGET: http://app:3001
+    ports:
+      - '127.0.0.1:3000:3000'
+
+volumes:
+  db_data_dev:

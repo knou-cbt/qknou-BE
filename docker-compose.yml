@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    volumes:
+      # postgres 이미지가 컨테이너 최초 생성(빈 볼륨) 시 1회만 실행.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # $$는 compose가 아니라 컨테이너 내부 셸이 확장하도록 이스케이프.
+      # dev/prod 오버레이가 넣어준 POSTGRES_USER/POSTGRES_DB를 그대로 읽음.
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../qknou-FE
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - app
