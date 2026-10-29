@@ -1,8 +1,9 @@
 name: Deploy to Production
 
+# 구버전(PM2) 배포. 운영은 Docker Compose(/opt/qknou)로 서버에서 직접 배포하므로
+# main push 때 자동 실행되지 않도록 수동 실행만 남겨둠.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
