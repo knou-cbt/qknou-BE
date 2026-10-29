@@ -20,6 +20,7 @@
 | 32~33 | 마이페이지 | 풀이 기록 목록(누적, 검색/페이지네이션) + 상세 조회 |
 | 34~36 | 북마크 | 목록 조회, 등록, 해제 |
 | 37 | 문항 | 문항 단건 공개 조회 (암기모드 공유 진입점) |
+| 38~41 | 개인 LLM | 내 개인 LLM 설정 조회, 등록, 수정/사용 전환, 삭제 |
 
 > 🚦 **요청 제한 (Rate Limit)**: 모든 API는 IP당 분당 120회로 제한되며 초과 시 `429 Too Many Requests`를 반환합니다. 일부 엔드포인트는 더 낮게 제한됩니다 — 관리자 로그인 분당 5회, 해설 조회/생성 분당 30회, AI 튜터 챗봇 분당 10회. `GET /api/health`는 제외.
 
@@ -657,7 +658,7 @@ function ExampleText({ text }: { text: string }) {
 | --- | --- |
 | **Method** | POST |
 | **URL** | /api/tutor/chat |
-| **설명** | 현재 문제 기반으로 개념 질문, 개념 비교, 관련 문제 추천 등을 처리하는 AI 튜터 챗봇입니다. **로그인 필수, 일일 5회 제한** |
+| **설명** | 현재 문제 기반으로 개념 질문, 개념 비교, 관련 문제 추천 등을 처리하는 AI 튜터 챗봇입니다. **로그인 필수, 일일 5회 제한** (한국시간 자정 초기화, 답변 생성에 실패한 요청은 차감 안 됨). 개인 LLM(#38~41)을 사용 중이면 그 LLM으로 답하고 횟수를 차감하지 않습니다. |
 | **인증** | JWT Bearer Token 필수 |
 
 **Request - Header**
@@ -671,8 +672,8 @@ function ExampleText({ text }: { text: string }) {
 | key | 설명 | value 타입 | 옵션 | Nullable | 예시 |
 | --- | --- | --- | --- | --- | --- |
 | questionId | 현재 문제 ID | number | - | N | 101 |
-| message | 사용자 질문 | string | - | N | "DI가 뭐야?" |
-| history | 최근 대화 내역 | array | optional | Y | - |
+| message | 사용자 질문 (최대 1000자) | string | - | N | "DI가 뭐야?" |
+| history | 최근 대화 내역 (최대 20개, 각 content 최대 4000자) | array | optional | Y | - |
 | history[].role | 메시지 역할 | string ("user" \| "assistant") | - | N | "user" |
 | history[].content | 메시지 내용 | string | - | N | "DI가 뭐야?" |
 
@@ -699,6 +700,7 @@ function ExampleText({ text }: { text: string }) {
 | data.recommendations[].examTitle | 시험 제목 | string | - | N |
 | data.recommendations[].year | 시험 연도 | number | - | N |
 | remainingCount | 오늘 남은 사용 횟수 (0~5) | number | - | N |
+| usingPersonalLlm | 개인 LLM으로 답변했는지 | boolean | - | N |
 
 **Example - 개념 질문 (define)**
 
@@ -1631,3 +1633,60 @@ failed  → rejected
 | 404 | 문항을 찾을 수 없음 |
 
 > ⚠️ 암기모드 특성상 정답/해설을 항상 포함하는 걸로 가정했습니다 (study 모드와 동일). 공유 링크로 들어온 사람에게도 정답까지 보여줄지는 확인 필요합니다.
+
+---
+
+## 38~41. 개인 LLM 설정
+
+사용자가 자기 LLM API Key를 등록하면 **AI 튜터 챗봇(#16)에서만** 그 LLM으로 답변합니다. 문제 해설(#14~15)은 모든 사용자가 같이 보는 데이터라 항상 서비스 기본 LLM으로 생성합니다. 사용자당 설정 1개.
+
+| 항목 | 내용 |
+| --- | --- |
+| **URL** | /api/users/me/llm-setting |
+| **인증** | JWT 필수 (본인 설정만 접근 가능). 관리자 전용 토큰은 403 |
+| **요청 제한** | 등록·수정은 외부 LLM 테스트 호출이 있어 분당 10회 |
+
+| # | Method | 설명 | 성공 |
+| --- | --- | --- | --- |
+| 38 | GET | 내 설정 조회. 없으면 404 | 200 |
+| 39 | POST | 등록. 이미 있으면 409 | 201 |
+| 40 | PATCH | 보낸 필드만 수정. `isEnabled`만 보내면 기본 LLM ↔ 개인 LLM 전환 | 200 |
+| 41 | DELETE | 삭제 (저장된 키도 삭제) | 204 |
+
+**Request - Body (POST / PATCH, PATCH는 전부 optional)**
+
+| key | 설명 | value 타입 | 옵션 | Nullable | 예시 |
+| --- | --- | --- | --- | --- | --- |
+| provider | `openai` \| `gemini` \| `custom`(그 외 OpenAI 호환 서버) | string | - | N | "openai" |
+| baseUrl | `custom`일 때 필수. https만, 내부망 주소 불가, `/v1`까지만 | string | optional | Y | "https://my-llm.example.com/v1" |
+| model | 모델 이름 | string | - | N | "gpt-4o-mini" |
+| apiKey | `openai`/`gemini`는 필수. 암호화 저장 | string | optional | Y | "sk-..." |
+| isEnabled | false면 등록만 해두고 기본 LLM 사용 (기본 true) | boolean | optional | Y | true |
+
+- 등록·수정 시 apiKey/model/baseUrl이 바뀌면 **저장 전에 실제로 한 번 호출해서 확인**하고, 실패하면 400으로 저장하지 않습니다.
+- `provider`나 `baseUrl`을 바꿀 때는 `apiKey`를 다시 보내야 합니다 (기존 키를 새 주소로 보내지 않기 위함).
+
+**Response (GET / POST / PATCH)**
+
+| key | 설명 | value 타입 | 옵션 | Nullable |
+| --- | --- | --- | --- | --- |
+| success | 성공 여부 | boolean | - | N |
+| data.provider | 제공자 | string | - | N |
+| data.baseUrl | custom일 때만 값 | string | optional | Y |
+| data.model | 모델 이름 | string | - | N |
+| data.apiKeyMasked | 키 끝 4자리 (예: "…abcd"). 키 원문은 어떤 API로도 반환하지 않음. 12자 미만 키는 null | string | optional | Y |
+| data.isEnabled | 사용 여부 | boolean | - | N |
+| data.createdAt / updatedAt | 생성·수정 시각 | string | - | N |
+
+**Status**
+
+| status | response content |
+| --- | --- |
+| 400 | 입력값 오류, https 아님/내부망 주소, 연결 확인 실패, provider·baseUrl 변경 시 apiKey 누락 |
+| 401 | 로그인 필요 |
+| 403 | 관리자 전용 토큰 |
+| 404 | 등록된 설정 없음 (GET/PATCH/DELETE) |
+| 409 | 이미 등록됨 (POST) |
+| 503 | 서버에 암호화 키(`LLM_KEY_ENCRYPTION_KEY`) 미설정으로 기능 비활성화 |
+
+**챗봇(#16)에서 개인 LLM 호출이 실패하면** `502`와 "등록한 개인 LLM 호출에 실패했습니다 (응답 코드 401)…" 메시지를 반환합니다 (기본 LLM으로 자동 전환하지 않음).
