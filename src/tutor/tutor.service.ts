@@ -1,10 +1,10 @@
 import {
+  HttpException,
   Injectable,
   InternalServerErrorException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import OpenAI from 'openai';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -13,6 +13,9 @@ import { Repository, LessThan } from 'typeorm';
 import { Term } from './entities/term.entity';
 import { Exam } from 'src/exams/entities/exam.entity';
 import { UserChatLimit } from './entities/chat-limit.entity';
+import { LlmService } from 'src/llm/llm.service';
+import { LlmTarget } from 'src/llm/llm-client';
+import { DAILY_CHAT_LIMIT, kstDaysAgo, kstToday } from './chat-limit-date';
 
 const PROMPT_VERSION = 'v1';
 
@@ -28,12 +31,15 @@ interface IntentResult {
 
 @Injectable()
 export class TutorService {
-  private openai: OpenAI;
-  private readonly useVllm: boolean;
   private readonly logger = new Logger(TutorService.name);
+  // 해설 없는 문제를 여러 사용자가 동시에 열면 같은 해설을 N번 생성하던 것을 1번으로 합침
+  private readonly explanationInFlight = new Map<
+    number,
+    Promise<{ explanation: string; conceptTags: string[] }>
+  >();
 
   constructor(
-    private configService: ConfigService,
+    private readonly llmService: LlmService,
     @InjectRepository(Questsion)
     private questionRepository: Repository<Questsion>,
     @InjectRepository(Term)
@@ -42,54 +48,11 @@ export class TutorService {
     private examRepository: Repository<Exam>,
     @InjectRepository(UserChatLimit)
     private chatLimitRepository: Repository<UserChatLimit>,
-  ) {
-    // VLLM_URL이 설정되어 있으면 자체 호스팅 vLLM을 사용하고,
-    // 없으면 기존처럼 OpenAI를 사용한다. GPT로 되돌리려면 VLLM_URL만 지우면 됨.
-    const vllmUrl = this.configService.get<string>('VLLM_URL');
-    this.useVllm = !!vllmUrl;
-
-    const apiKey = this.useVllm
-      ? this.configService.get<string>('VLLM_API_KEY') || 'not-needed'
-      : this.configService.get<string>('OPENAI_API_KEY');
-
-    this.openai = new OpenAI({
-      apiKey,
-      ...(this.useVllm ? { baseURL: vllmUrl } : {}),
-    });
-
-    if (this.useVllm) {
-      this.logger.log(`AI 튜터: vLLM 사용 (${vllmUrl})`);
-    }
-  }
-
-  private get model(): string {
-    if (this.useVllm) {
-      return (
-        this.configService.get<string>('VLLM_MODEL') ||
-        this.configService.get<string>('OPENAI_MODEL') ||
-        ''
-      );
-    }
-    return this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
-  }
+  ) {}
 
   private formatChoices(choices: any): string {
     if (!choices || !Array.isArray(choices)) return '';
     return choices.map((c: any) => `${c.number}번: ${c.text}`).join('\n');
-  }
-
-  // vLLM(Qwen 등 reasoning 모델)은 기본적으로 답변 전에 긴 thinking을
-  // reasoning 필드에 먼저 생성한다. 튜터 응답엔 필요 없고 지연/토큰만
-  // 늘리므로, vLLM 사용 시에만 thinking을 꺼서 호출한다.
-  private createChatCompletion(
-    params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
-  ) {
-    return this.openai.chat.completions.create({
-      ...params,
-      ...(this.useVllm
-        ? ({ chat_template_kwargs: { enable_thinking: false } } as any)
-        : {}),
-    });
   }
 
   // ──────────────────────────────────────────────
@@ -97,6 +60,19 @@ export class TutorService {
   // ──────────────────────────────────────────────
 
   async generateExplanation(
+    question: Questsion,
+  ): Promise<{ explanation: string; conceptTags: string[] }> {
+    const pending = this.explanationInFlight.get(question.id);
+    if (pending) return pending;
+
+    const task = this.generateAndSaveExplanation(question).finally(() =>
+      this.explanationInFlight.delete(question.id),
+    );
+    this.explanationInFlight.set(question.id, task);
+    return task;
+  }
+
+  private async generateAndSaveExplanation(
     question: Questsion,
   ): Promise<{ explanation: string; conceptTags: string[] }> {
     const systemPrompt = `KNOU 기출문제 해설 생성. JSON만 출력.
@@ -112,15 +88,18 @@ ${this.formatChoices(question.choices)}
     try {
       this.logger.log(`문제 ID ${question.id} 해설 생성 요청 시작`);
 
-      const response = await this.createChatCompletion({
-        model: this.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.7,
-        response_format: { type: 'json_object' },
-      });
+      // 해설은 DB에 저장돼 모든 사용자가 같이 보므로 항상 기본 LLM으로 생성
+      const response = await this.llmService.complete(
+        this.llmService.defaultTarget,
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.7,
+          response_format: { type: 'json_object' },
+        },
+      );
 
       const raw = response.choices[0]?.message?.content || '';
       const parsed = JSON.parse(raw);
@@ -141,6 +120,7 @@ ${this.formatChoices(question.choices)}
 
       return { explanation, conceptTags };
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       this.logger.error(
         `해설 생성 중 오류 발생 (문제 ID: ${question.id}):`,
         error,
@@ -155,7 +135,10 @@ ${this.formatChoices(question.choices)}
   // 2. AI 튜터 챗봇 — intent 분류
   // ──────────────────────────────────────────────
 
-  private async classifyIntent(userMessage: string): Promise<IntentResult> {
+  private async classifyIntent(
+    target: LlmTarget,
+    userMessage: string,
+  ): Promise<IntentResult> {
     const systemPrompt = `사용자의 질문을 분석하여 의도(intent)와 핵심 개념(term_candidates)을 추출하세요.
 
 반드시 아래 JSON 형식으로만 응답하세요.
@@ -177,8 +160,7 @@ term_candidates 규칙:
 - 질문에서 핵심 개념이 없으면 빈 배열`;
 
     try {
-      const response = await this.createChatCompletion({
-        model: this.model,
+      const response = await this.llmService.complete(target, {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
@@ -197,6 +179,8 @@ term_candidates 규칙:
         ),
       };
     } catch (error) {
+      // 대기열 초과(503)·개인 LLM 오류(502)는 다음 호출도 실패하므로 바로 올려보냄
+      if (error instanceof HttpException) throw error;
       this.logger.error('intent 분류 실패:', error);
       return { intent: 'general', term_candidates: [] };
     }
@@ -207,6 +191,7 @@ term_candidates 규칙:
   // ──────────────────────────────────────────────
 
   private async getTermExplanation(
+    target: LlmTarget,
     term: string,
     subjectId: number,
   ): Promise<string> {
@@ -232,15 +217,16 @@ term_candidates 규칙:
       .then((count) => count > 0);
 
     // 3. LLM으로 설명 생성
-    const explanation = await this.generateTermExplanation(term);
+    const explanation = await this.generateTermExplanation(target, term);
 
-    // 4. 유효한 개념이면 캐시, 아니면 1회성 반환
-    if (isValidConcept) {
+    // 4. 유효한 개념이면 캐시, 아니면 1회성 반환.
+    //    개인 LLM 응답은 공용 캐시(다른 사용자도 보는 값)에 넣지 않음
+    if (isValidConcept && !target.isPersonal) {
       const newTerm = this.termRepository.create({
         subject_id: subjectId,
         term,
         explanation,
-        model: this.model,
+        model: target.model,
         prompt_version: PROMPT_VERSION,
         hit_count: 1,
       });
@@ -253,7 +239,10 @@ term_candidates 규칙:
     return explanation;
   }
 
-  private async generateTermExplanation(term: string): Promise<string> {
+  private async generateTermExplanation(
+    target: LlmTarget,
+    term: string,
+  ): Promise<string> {
     const systemPrompt = `당신은 한국방송통신대학교(KNOU) 학생들의 학습을 돕는 '방송대 튜터'입니다.
 학생이 궁금해하는 개념에 대해 명확하고 이해하기 쉬운 설명을 제공합니다.
 
@@ -267,8 +256,7 @@ term_candidates 규칙:
     const userPrompt = `"${term}" 개념에 대해 설명해주세요.`;
 
     try {
-      const response = await this.createChatCompletion({
-        model: this.model,
+      const response = await this.llmService.complete(target, {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -280,6 +268,7 @@ term_candidates 규칙:
         response.choices[0]?.message?.content || '설명을 생성하지 못했습니다.'
       );
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       this.logger.error(`개념 설명 생성 실패 (${term}):`, error);
       throw new InternalServerErrorException(
         '개념 설명을 생성하지 못했습니다.',
@@ -291,7 +280,10 @@ term_candidates 규칙:
   // 4. 개념 비교 (compare)
   // ──────────────────────────────────────────────
 
-  private async compareTerms(terms: string[]): Promise<string> {
+  private async compareTerms(
+    target: LlmTarget,
+    terms: string[],
+  ): Promise<string> {
     const systemPrompt = `당신은 한국방송통신대학교(KNOU) 학생들의 학습을 돕는 '방송대 튜터'입니다.
 
 가이드라인:
@@ -305,8 +297,7 @@ term_candidates 규칙:
     const userPrompt = `다음 개념들을 비교하여 설명해주세요: ${terms.join(', ')}`;
 
     try {
-      const response = await this.createChatCompletion({
-        model: this.model,
+      const response = await this.llmService.complete(target, {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -319,6 +310,7 @@ term_candidates 규칙:
         '비교 설명을 생성하지 못했습니다.'
       );
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       this.logger.error(`개념 비교 실패 (${terms.join(', ')}):`, error);
       throw new InternalServerErrorException(
         '개념 비교 설명을 생성하지 못했습니다.',
@@ -397,6 +389,7 @@ term_candidates 규칙:
   // ──────────────────────────────────────────────
 
   private async answerGeneral(
+    target: LlmTarget,
     question: Questsion,
     userMessage: string,
     history: ChatMessage[],
@@ -425,8 +418,7 @@ term_candidates 규칙:
     ];
 
     try {
-      const response = await this.createChatCompletion({
-        model: this.model,
+      const response = await this.llmService.complete(target, {
         messages,
         temperature: 0.7,
       });
@@ -435,6 +427,7 @@ term_candidates 규칙:
         response.choices[0]?.message?.content || '답변을 생성하지 못했습니다.'
       );
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       this.logger.error('일반 질문 응답 실패:', error);
       throw new InternalServerErrorException('답변을 생성하지 못했습니다.');
     }
@@ -444,10 +437,14 @@ term_candidates 규칙:
   // 메인: AI 튜터 채팅
   // ──────────────────────────────────────────────
 
+  /**
+   * @param target 사용자 개인 LLM. 없으면 기본 LLM
+   */
   async chat(
     questionId: number,
     userMessage: string,
     history: ChatMessage[] = [],
+    target: LlmTarget = this.llmService.defaultTarget,
   ): Promise<{
     answer: string;
     intent: string;
@@ -471,7 +468,10 @@ term_candidates 규칙:
     const subjectId = question.exam.subject_id;
 
     // 1. intent 분류
-    const { intent, term_candidates } = await this.classifyIntent(userMessage);
+    const { intent, term_candidates } = await this.classifyIntent(
+      target,
+      userMessage,
+    );
     this.logger.log(`intent: ${intent}, terms: ${term_candidates.join(', ')}`);
 
     let answer: string;
@@ -489,10 +489,17 @@ term_candidates 규칙:
     switch (intent) {
       case 'define': {
         if (term_candidates.length === 0) {
-          answer = await this.answerGeneral(question, userMessage, history);
+          answer = await this.answerGeneral(
+            target,
+            question,
+            userMessage,
+            history,
+          );
         } else {
           const explanations = await Promise.all(
-            term_candidates.map((t) => this.getTermExplanation(t, subjectId)),
+            term_candidates.map((t) =>
+              this.getTermExplanation(target, t, subjectId),
+            ),
           );
           answer = explanations.join('\n\n---\n\n');
         }
@@ -501,9 +508,14 @@ term_candidates 규칙:
 
       case 'compare': {
         if (term_candidates.length < 2) {
-          answer = await this.answerGeneral(question, userMessage, history);
+          answer = await this.answerGeneral(
+            target,
+            question,
+            userMessage,
+            history,
+          );
         } else {
-          answer = await this.compareTerms(term_candidates);
+          answer = await this.compareTerms(target, term_candidates);
         }
         break;
       }
@@ -525,7 +537,12 @@ term_candidates 규칙:
       }
 
       default: {
-        answer = await this.answerGeneral(question, userMessage, history);
+        answer = await this.answerGeneral(
+          target,
+          question,
+          userMessage,
+          history,
+        );
         break;
       }
     }
@@ -538,13 +555,25 @@ term_candidates 규칙:
   // ──────────────────────────────────────────────
 
   async getRemainingCount(userId: string): Promise<number> {
-    const today = new Date().toISOString().split('T')[0];
     const limit = await this.chatLimitRepository.findOne({
-      where: { user_id: userId, date: today as any },
+      where: { user_id: userId, date: kstToday() as any },
     });
 
-    if (!limit) return 5;
-    return Math.max(0, 5 - limit.count);
+    if (!limit) return DAILY_CHAT_LIMIT;
+    return Math.max(0, DAILY_CHAT_LIMIT - limit.count);
+  }
+
+  /** LLM 호출이 실패한 요청은 ChatLimitGuard에서 차감한 1회를 되돌려줌 */
+  async refundChatCount(userId: string, date: string): Promise<void> {
+    await this.chatLimitRepository
+      .createQueryBuilder()
+      .update()
+      .set({ count: () => 'count - 1' })
+      .where('user_id = :userId AND date = :date AND count > 0', {
+        userId,
+        date,
+      })
+      .execute();
   }
 
   // ──────────────────────────────────────────────
@@ -563,9 +592,7 @@ term_candidates 규칙:
 
     try {
       // 90일 이전 날짜 계산
-      const ninetyDaysAgo = new Date();
-      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-      const cutoffDate = ninetyDaysAgo.toISOString().split('T')[0];
+      const cutoffDate = kstDaysAgo(90);
 
       // 삭제 전 개수 확인
       const countBefore = await this.chatLimitRepository.count({
@@ -599,9 +626,7 @@ term_candidates 규칙:
     deleted: number;
     cutoffDate: string;
   }> {
-    const daysAgo = new Date();
-    daysAgo.setDate(daysAgo.getDate() - days);
-    const cutoffDate = daysAgo.toISOString().split('T')[0];
+    const cutoffDate = kstDaysAgo(days);
 
     const result = await this.chatLimitRepository.delete({
       date: LessThan(cutoffDate as any),

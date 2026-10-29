@@ -51,7 +51,7 @@ AI 기능은 크게 두 가지로 구성한다.
 | Method | URL | 설명 |
 | --- | --- | --- |
 | GET | /api/tutor/questions/:id/explanation | 해설 조회 (없으면 생성) |
-| POST | /api/tutor/questions/:id/explanation/regenerate | 해설 강제 재생성 |
+| POST | /api/tutor/questions/:id/explanation/regenerate | 해설 강제 재생성 (관리자 전용) |
 
 ### concept_tags 추출 프롬프트 핵심 규칙
 
@@ -200,7 +200,9 @@ LLM을 통해 사용자 질문의 의도와 핵심 개념을 추출한다.
 | --- | --- |
 | 제한 횟수 | 일 5회 |
 | 제한 단위 | 로그인한 사용자별 (user_id 기준) |
-| 리셋 주기 | 매일 자정 (날짜 변경 시 자동 리셋) |
+| 리셋 주기 | 매일 한국시간 자정 (이전엔 UTC 기준이라 오전 9시에 리셋됐음) |
+| 실패한 요청 | 답변 생성에 실패하면 차감한 1회를 돌려줌 |
+| 개인 LLM | 사용 중이면 차감하지 않음 (분당 10회 요청 제한은 그대로) |
 | 비로그인 사용자 | 챗봇 사용 불가 (로그인 필수) |
 
 ### user_chat_limits 테이블
@@ -220,17 +222,19 @@ LLM을 통해 사용자 질문의 의도와 핵심 개념을 추출한다.
 ```
 요청 → JwtAuthGuard (로그인 검증) 
   → ChatLimitGuard (횟수 제한 검증)
-  → TutorService.chat() 실행
-  → 응답 { data, remainingCount }
+  → (개인 LLM 사용 중이면) LlmSettingsService.resolveTarget()
+  → TutorService.chat() 실행 — 실패 시 횟수 환불
+  → 응답 { data, remainingCount, usingPersonalLlm }
 ```
 
 **ChatLimitGuard 로직:**
 ```
 1. JWT에서 user_id 추출
-2. 오늘 날짜(YYYY-MM-DD) 기준으로 user_chat_limits 조회
-3. 레코드 없음 → 생성 (count: 1) → 통과
-4. count < 5 → increment → 통과
-5. count >= 5 → 403 Forbidden
+2. 사용 중인 개인 LLM이 있으면 → 차감 없이 통과
+3. 오늘 날짜(한국시간 YYYY-MM-DD)로 `UPDATE ... SET count = count + 1 WHERE count < 5 RETURNING count`
+   → 행이 바뀌면 통과 (조회와 증가를 한 쿼리로 해서 동시 요청이 5회를 넘지 못함)
+4. 안 바뀌었는데 오늘 행이 있음 → 403 Forbidden
+5. 오늘 행이 없음 → 생성 (count: 1) → 통과 (동시 생성으로 unique 위반 시 3번 재시도)
 ```
 
 ### API 변경사항
@@ -349,3 +353,11 @@ WHERE date < CURRENT_DATE - INTERVAL '90 days';
 | `src/tutor/tutor.module.ts` | Term, Exam, UserChatLimit 엔티티 등록 |
 | `src/tutor/tutor.service.ts` | 전면 리팩토링 — 해설+태그 동시 생성, intent 분류, 개념 설명/비교/추천/일반 응답, terms 캐시 검증, getRemainingCount() 추가 |
 | `src/tutor/tutor.controller.ts` | `POST /api/tutor/chat`에 JwtAuthGuard + ChatLimitGuard 적용, remainingCount 응답 추가, `GET /api/tutor/remaining-count` 엔드포인트 추가 |
+
+## LLM 연결 구조 (2026-10-29)
+
+- 모든 LLM 호출은 `src/llm/llm.service.ts`의 `LlmService.complete(target, params)`를 거친다. 타임아웃(30초)·재시도·동시 호출 제한(5건 + 대기열 20건, 초과 시 503)이 여기서 공통 적용된다.
+- 기본 LLM은 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`(+`LLM_PROVIDER`)로 설정한다. 없으면 기존 `VLLM_*` → `OPENAI_*` 순으로 판단해서 기존 운영 설정이 그대로 동작한다 (`src/llm/llm-client.ts`).
+- vLLM 전용 옵션(`chat_template_kwargs.enable_thinking=false`)은 provider가 `vllm`일 때만 보낸다.
+- 해설 생성은 항상 기본 LLM. 챗봇은 사용자가 개인 LLM을 등록·사용 중이면 그 LLM을 쓰고, 이때 생성된 개념 설명은 공용 `terms` 캐시에 저장하지 않는다.
+- 개인 LLM: `src/llm-settings/` (API는 docs/API.md #38~41). 키는 AES-256-GCM(`LLM_KEY_ENCRYPTION_KEY`)으로 암호화 저장, custom 주소는 https + 공인 IP만 허용(SSRF 방지), 리다이렉트 미추종, 재시도 없음.

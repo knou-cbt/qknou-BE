@@ -1,0 +1,59 @@
+# 자원 제한: 한 컨테이너가 메모리를 다 써서 같은 서버의 나머지(Nginx 포함)까지
+# 죽이는 걸 막기 위한 상한. 기본값은 2GB 서버 기준 — 서버 사양에 맞게
+# 서버의 .env(compose와 같은 폴더)에서 *_MEM_LIMIT / *_CPUS로 덮어쓴다.
+# 로그: 기본 json-file 드라이버는 무제한으로 쌓여 디스크를 채우므로 10MB x 3개로 순환.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    mem_limit: ${DB_MEM_LIMIT:-768m}
+    cpus: ${DB_CPUS:-1.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    volumes:
+      # postgres 이미지가 컨테이너 최초 생성(빈 볼륨) 시 1회만 실행.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # $$는 compose가 아니라 컨테이너 내부 셸이 확장하도록 이스케이프.
+      # dev/prod 오버레이가 넣어준 POSTGRES_USER/POSTGRES_DB를 그대로 읽음.
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: ${APP_MEM_LIMIT:-512m}
+    cpus: ${APP_CPUS:-1.0}
+    environment:
+      # V8 힙을 컨테이너 상한보다 낮게 잡아야 OOM Kill 전에 GC가 먼저 돈다
+      NODE_OPTIONS: ${APP_NODE_OPTIONS:---max-old-space-size=384}
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../qknou-FE
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: ${WEB_MEM_LIMIT:-512m}
+    cpus: ${WEB_CPUS:-1.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    depends_on:
+      - app

@@ -11,6 +11,7 @@ import {
   Query,
   Delete,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { TutorService } from './tutor.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
@@ -26,17 +27,22 @@ import { TutorChatDto } from './dto/chat.dto';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { AdminGuard } from 'src/auth/guards/admin.guard';
 import { ChatLimitGuard } from './guards/chat-limit.guard';
+import { LlmSettingsService } from 'src/llm-settings/llm-settings.service';
+import { DAILY_CHAT_LIMIT } from './chat-limit-date';
 
 @ApiTags('tutor')
 @Controller('api/tutor')
 export class TutorController {
   constructor(
     private readonly tutorService: TutorService,
+    private readonly llmSettingsService: LlmSettingsService,
     @InjectRepository(Questsion)
     private questionRepository: Repository<Questsion>,
   ) {}
 
   @Get('questions/:id/explanation')
+  // 해설이 없으면 LLM을 호출하는 공개 엔드포인트 → 전역보다 낮게 제한
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: '특정 문제 해설 조회 및 생성',
     description:
@@ -69,13 +75,17 @@ export class TutorController {
   }
 
   @Post('questions/:id/explanation/regenerate')
+  // 기존 해설을 덮어쓰고 LLM을 호출하므로 관리자 전용 (이전엔 인증 없이 열려 있었음)
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '특정 문제 해설 재생성',
     description:
-      '기존 해설을 AI 모델을 통해 강제로 다시 생성하여 덮어씁니다. concept_tags도 함께 재생성됩니다.',
+      '기존 해설을 AI 모델을 통해 강제로 다시 생성하여 덮어씁니다. concept_tags도 함께 재생성됩니다. 관리자 전용.',
   })
   @ApiParam({ name: 'id', description: '문제 ID', type: Number })
   @ApiResponse({ status: 201, description: '해설 재생성 성공' })
+  @ApiResponse({ status: 403, description: '관리자 권한 필요' })
   async regenerateExplanation(@Param('id', ParseIntPipe) id: number) {
     const question = await this.questionRepository.findOne({ where: { id } });
     if (!question) {
@@ -93,11 +103,13 @@ export class TutorController {
 
   @Post('chat')
   @UseGuards(JwtAuthGuard, ChatLimitGuard)
+  // 일일 횟수 제한(ChatLimitGuard)과 별개로 짧은 시간 연타 방지
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'AI 튜터 챗봇 (로그인 필수, 일 5회 제한)',
     description:
-      '현재 문제 기반으로 개념 질문, 해설 질문, 비교, 관련 문제 추천 등을 처리합니다. 로그인한 사용자만 사용 가능하며 하루 5회로 제한됩니다.',
+      '현재 문제 기반으로 개념 질문, 해설 질문, 비교, 관련 문제 추천 등을 처리합니다. 로그인한 사용자만 사용 가능하며 하루 5회(한국시간 자정 초기화)로 제한됩니다. 답변 생성에 실패하면 횟수가 차감되지 않습니다. 개인 LLM을 사용 중이면 그 LLM으로 답하고 횟수를 차감하지 않습니다.',
   })
   @ApiResponse({
     status: 200,
@@ -110,6 +122,7 @@ export class TutorController {
           intent: 'define',
         },
         remainingCount: 4,
+        usingPersonalLlm: false,
       },
     },
   })
@@ -119,16 +132,33 @@ export class TutorController {
     description: '일일 사용 횟수 초과 (5회 제한)',
   })
   async chat(@Body() dto: TutorChatDto, @Req() req: any) {
-    const result = await this.tutorService.chat(
-      dto.questionId,
-      dto.message,
-      dto.history || [],
-    );
+    const userId = req.user.id;
+    let result: Awaited<ReturnType<TutorService['chat']>>;
+    try {
+      const personalTarget = req.usingPersonalLlm
+        ? await this.llmSettingsService.resolveTarget(userId)
+        : null;
+      result = await this.tutorService.chat(
+        dto.questionId,
+        dto.message,
+        dto.history || [],
+        personalTarget ?? undefined,
+      );
+    } catch (error) {
+      // 답변을 못 받은 요청은 일일 횟수를 돌려줌
+      if (req.chatCountDate) {
+        await this.tutorService
+          .refundChatCount(userId, req.chatCountDate)
+          .catch(() => undefined);
+      }
+      throw error;
+    }
 
     return {
       success: true,
       data: result,
       remainingCount: req.remainingCount,
+      usingPersonalLlm: Boolean(req.usingPersonalLlm),
     };
   }
 
@@ -157,7 +187,7 @@ export class TutorController {
     return {
       success: true,
       remainingCount: remaining,
-      totalLimit: 5,
+      totalLimit: DAILY_CHAT_LIMIT,
     };
   }
 

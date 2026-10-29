@@ -8,6 +8,7 @@ if (process.env.NEW_RELIC_LICENSE_KEY) {
 
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
@@ -15,7 +16,13 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 process.env.TZ = 'Asia/Seoul';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Nginx(호스트) → (Next.js 프록시) → app 순서로 들어오므로 req.ip가 프록시 IP가 됨.
+  // 사설/루프백 대역 프록시만 신뢰해서 X-Forwarded-For에서 실제 클라이언트 IP를
+  // 꺼내도록 함 — 요청 제한(Throttler)이 IP 기준이라 이게 없으면 전 사용자가 한
+  // IP로 묶여 같이 막힌다. 외부에서 위조한 X-Forwarded-For 앞부분은 무시됨.
+  app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 
   // 전역 Validation Pipe 설정
   app.useGlobalPipes(
@@ -78,6 +85,7 @@ async function bootstrap() {
     .addTag('feedbacks', '피드백 관련 API')
     .addTag('questions', '문항 관련 API')
     .addTag('exam-submissions', '시험지 등록 관련 API')
+    .addTag('llm-settings', '개인 LLM 설정 API')
     .addBearerAuth(
       {
         type: 'http',
