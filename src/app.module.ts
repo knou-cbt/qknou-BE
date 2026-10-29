@@ -20,6 +20,7 @@ import { ExamHistoryModule } from './exam-history/exam-history.module';
 import { NoticesModule } from './notices/notices.module';
 import { FeedbacksModule } from './feedbacks/feedbacks.module';
 import { ExamSubmissionsModule } from './exam-submissions/exam-submissions.module';
+import { LlmSettingsModule } from './llm-settings/llm-settings.module';
 
 // DATABASE_URL의 비밀번호 부분을 URL 인코딩하는 함수
 function encodePasswordInUrl(url: string): string {
@@ -123,6 +124,7 @@ function encodePasswordInUrl(url: string): string {
     NoticesModule,
     FeedbacksModule,
     ExamSubmissionsModule,
+    LlmSettingsModule,
   ],
   controllers: [AppController],
   providers: [

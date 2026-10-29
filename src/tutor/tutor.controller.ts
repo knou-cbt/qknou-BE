@@ -27,12 +27,15 @@ import { TutorChatDto } from './dto/chat.dto';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { AdminGuard } from 'src/auth/guards/admin.guard';
 import { ChatLimitGuard } from './guards/chat-limit.guard';
+import { LlmSettingsService } from 'src/llm-settings/llm-settings.service';
+import { DAILY_CHAT_LIMIT } from './chat-limit-date';
 
 @ApiTags('tutor')
 @Controller('api/tutor')
 export class TutorController {
   constructor(
     private readonly tutorService: TutorService,
+    private readonly llmSettingsService: LlmSettingsService,
     @InjectRepository(Questsion)
     private questionRepository: Repository<Questsion>,
   ) {}
@@ -106,7 +109,7 @@ export class TutorController {
   @ApiOperation({
     summary: 'AI 튜터 챗봇 (로그인 필수, 일 5회 제한)',
     description:
-      '현재 문제 기반으로 개념 질문, 해설 질문, 비교, 관련 문제 추천 등을 처리합니다. 로그인한 사용자만 사용 가능하며 하루 5회로 제한됩니다.',
+      '현재 문제 기반으로 개념 질문, 해설 질문, 비교, 관련 문제 추천 등을 처리합니다. 로그인한 사용자만 사용 가능하며 하루 5회(한국시간 자정 초기화)로 제한됩니다. 답변 생성에 실패하면 횟수가 차감되지 않습니다. 개인 LLM을 사용 중이면 그 LLM으로 답하고 횟수를 차감하지 않습니다.',
   })
   @ApiResponse({
     status: 200,
@@ -119,6 +122,7 @@ export class TutorController {
           intent: 'define',
         },
         remainingCount: 4,
+        usingPersonalLlm: false,
       },
     },
   })
@@ -128,16 +132,33 @@ export class TutorController {
     description: '일일 사용 횟수 초과 (5회 제한)',
   })
   async chat(@Body() dto: TutorChatDto, @Req() req: any) {
-    const result = await this.tutorService.chat(
-      dto.questionId,
-      dto.message,
-      dto.history || [],
-    );
+    const userId = req.user.id;
+    let result: Awaited<ReturnType<TutorService['chat']>>;
+    try {
+      const personalTarget = req.usingPersonalLlm
+        ? await this.llmSettingsService.resolveTarget(userId)
+        : null;
+      result = await this.tutorService.chat(
+        dto.questionId,
+        dto.message,
+        dto.history || [],
+        personalTarget ?? undefined,
+      );
+    } catch (error) {
+      // 답변을 못 받은 요청은 일일 횟수를 돌려줌
+      if (req.chatCountDate) {
+        await this.tutorService
+          .refundChatCount(userId, req.chatCountDate)
+          .catch(() => undefined);
+      }
+      throw error;
+    }
 
     return {
       success: true,
       data: result,
       remainingCount: req.remainingCount,
+      usingPersonalLlm: Boolean(req.usingPersonalLlm),
     };
   }
 
@@ -166,7 +187,7 @@ export class TutorController {
     return {
       success: true,
       remainingCount: remaining,
-      totalLimit: 5,
+      totalLimit: DAILY_CHAT_LIMIT,
     };
   }
 
