@@ -81,12 +81,12 @@ yarn lint && yarn test && yarn build
 | `POST /users` | 인증 없이 열린 미사용 엔드포인트 | 제거 |
 | `GET /api/health/db`, `/performance` | 공개 (DB 정보 노출, 실쿼리 반복 실행) | 관리자 전용 |
 | 요청 제한 | 없음 | IP당 분당 120회(전역), 관리자 로그인 5회, 해설 조회 30회, 챗봇 10회. `GET /api/health` 제외 |
-| 프록시 뒤 IP | 미설정 | `trust proxy`를 사설/루프백 대역으로 설정 → X-Forwarded-For에서 실제 IP 추출 |
+| 프록시 뒤 IP | 미설정 | `trust proxy`를 사설/루프백 대역으로 설정 → X-Forwarded-For에서 실제 IP 추출. 내부망(web 컨테이너 SSR·API 라우트) 요청은 제한 제외 |
 | 챗봇 입력 | `role`에 `system` 허용(시스템 프롬프트 주입 가능), 길이 무제한 | `user`/`assistant`만, 질문 1000자·히스토리 20개×4000자 상한 |
 | LLM 타임아웃 | SDK 기본값(10분, 재시도 2회) | 30초, 재시도 1회 |
 | LLM 동시 호출 | 무제한 | 동시 5건 + 대기열 20건, 초과 시 503 |
 | 해설 중복 생성 | 같은 문제를 동시에 열면 N번 생성 | 진행 중인 생성 1건으로 합침 |
-| DB SSL | `main`은 항상 SSL → SSL 없는 DB(Docker Postgres)에 연결 불가 | `DB_SSL=false`로 끌 수 있음. 미설정 시 기존 동작(SSL) 유지 |
+| DB SSL | `main`은 항상 SSL → SSL 없는 DB(Docker Postgres)에 연결 불가 | `docker` 브랜치와 같이 미설정=SSL 끔(운영 Docker Postgres 기준). 관리형 DB는 `DB_SSL=true` |
 | CI | 테스트 비활성화 | `yarn test` 실행 |
 
 모든 값은 환경변수로 조정 가능(`.env.example`의 `RATE_LIMIT_*`, `LLM_*`, `DB_SSL`).
@@ -102,14 +102,15 @@ yarn lint && yarn test && yarn build
 | 정책 | 해설은 항상 기본 LLM(공용 데이터). 개인 LLM 사용 중엔 일일 횟수 미차감. 개인 LLM 실패 시 502 (기본 LLM으로 자동 전환 안 함) |
 | 챗봇 횟수 버그 | 한국시간 자정 초기화, 조건부 UPDATE로 동시 요청 한도 초과 방지, 실패한 요청은 환불 |
 | Docker | app/web 512MB·db 768MB·각 1 CPU 상한(서버 `.env`로 조정), V8 힙 384MB, 로그 10MB×3 순환, app `DB_SSL=false` 명시 |
-| 테스트 | 110개 통과 (10/28 57개 → 53개 추가) |
+| 테스트 | 119개 통과 (10/28 57개 → 62개 추가) |
 
 ### 배포 전 필수 작업
 1. 운영 DB에 `migrations/20261029_add_user_llm_settings.sql` 실행.
 2. 운영 `.env.production`에 `LLM_KEY_ENCRYPTION_KEY` 추가 (`openssl rand -base64 32`). 다른 시크릿과 같이 백업 — 잃어버리면 사용자들이 등록한 키를 복호화할 수 없음. 없으면 개인 LLM만 비활성화되고 나머지는 정상 동작.
 3. 신규 LLM으로 바꿀 때: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` 추가 후 재시작. 롤백은 세 줄 삭제 후 재시작.
-4. 브랜치 머지 순서: `feature/handover-security` → `feature/llm-settings` → (Docker 배포로 확정되면) `docker` + `chore/docker-resource-limits`.
-   `docker` 브랜치의 `app.module.ts`는 `DB_SSL` 미설정을 SSL 끔으로, main 쪽은 SSL 켬으로 해석하므로 머지 시 충돌 → main 쪽(미설정=켬)을 택하고 compose에서 `DB_SSL=false`를 명시하는 현재 구성을 유지할 것.
+4. 운영은 Docker Compose(`/opt/qknou`, `scripts/deploy/setup-compose.sh`로 생성). 10/30에 `docker` 브랜치를 `develop`에 머지했고 `DB_SSL`은 `docker` 쪽 해석(미설정=끔)을 택함 — 현재 운영 `.env.production`을 그대로 써도 DB 연결이 유지됨.
+5. `.github/workflows/deploy.yml`은 PM2 기준(`~/qknou-BE`, `deploy.sh`, `pm2 save`)이라 Docker 운영과 맞지 않음. `main` push 때 실행되므로 서버에 옛 PM2 프로세스가 남아 있지 않은지 확인 후 Docker 배포 방식으로 교체 필요.
+6. 프론트 `/api/tutor/*` 라우트가 백엔드 호출 시 `X-Forwarded-For`를 전달하지 않음 → 지금은 내부 요청으로 간주돼 IP당 분당 제한이 빠짐(일일 5회 제한은 사용자 기준이라 그대로). 프론트에서 헤더를 넘기면 IP당 제한이 다시 적용됨.
 
 ## 6. 남은 이슈 / 후속 작업
 

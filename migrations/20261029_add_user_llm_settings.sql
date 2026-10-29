@@ -11,5 +11,5 @@ CREATE TABLE IF NOT EXISTS user_llm_settings (
   is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT UQ_user_llm_settings_user_id UNIQUE (user_id)
+  CONSTRAINT "UQ_user_llm_settings_user_id" UNIQUE (user_id)
 );
