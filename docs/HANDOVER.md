@@ -1,6 +1,6 @@
 # 백엔드 인수인계 현황
 
-> 2026-10-28 기준. 인수 일정(10/27~11/2) 동안 계속 갱신하고, 11/2에 최종 인수인계 문서로 정리한다.
+> 2026-10-29 기준. 인수 일정(10/27~11/2) 동안 계속 갱신하고, 11/2에 최종 인수인계 문서로 정리한다.
 
 ## 1. 시스템 구성
 
@@ -10,7 +10,7 @@
 | 런타임 | Node 20 (CI·Dockerfile 기준). 로컬 Node 22에서도 빌드·테스트 통과 |
 | 패키지 매니저 | **Yarn 1 (classic)** — `yarn.lock` v1 |
 | 인증 | 구글/카카오 OAuth → 자체 JWT 발급(기본 7일). 관리자는 `ADMIN_EMAIL` 일치 또는 아이디/비밀번호 로그인(`role: admin` 토큰) |
-| LLM | `openai` SDK. 기본 OpenAI(`gpt-4o-mini`), `VLLM_URL` 설정 시 자체 호스팅 vLLM(OpenAI 호환)로 전환. 코드 위치: `src/tutor/tutor.service.ts` |
+| LLM | `openai` SDK로 OpenAI 호환 API 호출. 기본 LLM은 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`(없으면 기존 `VLLM_*`/`OPENAI_*`). 모든 호출은 `src/llm/llm.service.ts` 경유. 사용자 개인 LLM은 `src/llm-settings/` |
 | 파일 저장소 | Cloudflare R2 (`R2_*` 환경변수, `src/storage`) |
 | 모니터링 | Sentry(`SENTRY_DSN`), New Relic(`NEW_RELIC_LICENSE_KEY`) — 둘 다 값이 있을 때만 활성화 |
 | 기타 연동 | 피드백 → GitHub Issue(`GITHUB_*`), Discord Webhook(`DISCORD_WEBHOOK_URL`) |
@@ -20,6 +20,10 @@
 - `main`: 운영 브랜치. push 시 `.github/workflows/deploy.yml`이 EC2에 SSH로 접속해 `~/qknou-BE`에서 `git pull` → `yarn install` → `bash ./deploy.sh` → `pm2 save` 실행.
 - `develop`: `main`과 동일 커밋(0c81f98).
 - `docker`: **`main`에 머지되지 않은** Docker Compose 배포 구성(7커밋). Dockerfile, compose(base/dev/prod), Nginx 사이트 설정 3개(`default`, `www.qknou.kr`, `api.qknou.kr`), `setup-compose.sh`(`/opt/qknou`에 최종 compose 생성), `apply-nginx.sh` 포함.
+- 인수 후 작업 브랜치 (아직 push 안 함):
+  - `feature/handover-security` (main 기준): 10/28 API 보안·요청 제한·LLM 보호
+  - `feature/llm-settings` (위 브랜치 기준): 10/29 LLM 공통화·개인 LLM·챗봇 횟수 버그 수정
+  - `chore/docker-resource-limits` (docker 기준): 컨테이너 자원 제한·로그 순환
 - 기타: `feature/auth`, `feature/bookmark-notes`, `fix/question-detail-exam-year`, `docs/api-v2-draft` — 정리 필요 여부 확인 필요.
 
 ### 배포 구조 (docker 브랜치 기준)
@@ -87,7 +91,27 @@ yarn lint && yarn test && yarn build
 
 모든 값은 환경변수로 조정 가능(`.env.example`의 `RATE_LIMIT_*`, `LLM_*`, `DB_SSL`).
 
-## 5. 남은 이슈 / 후속 작업
+## 5. 10/29 적용 사항 (브랜치 `feature/llm-settings`, `chore/docker-resource-limits`)
+
+| 항목 | 내용 |
+| --- | --- |
+| LLM 공통화 | 업체와 관계없이 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`(+`LLM_PROVIDER`)로 전환. 기존 운영 `.env`(OPENAI_*/VLLM_*)는 수정 없이 그대로 동작. vLLM 전용 옵션은 vLLM일 때만 전송 |
+| 개인 LLM | `GET/POST/PATCH/DELETE /api/users/me/llm-setting` (docs/API.md #38~41). openai/gemini/custom(OpenAI 호환). 챗봇에서만 사용 |
+| 키 보관 | AES-256-GCM 암호화(`LLM_KEY_ENCRYPTION_KEY`). 응답엔 끝 4자리만, 로그에도 미기록 |
+| SSRF 방지 | custom 주소는 https + 공인 IP만, 호출 때마다 재검사, 리다이렉트 미추종 |
+| 정책 | 해설은 항상 기본 LLM(공용 데이터). 개인 LLM 사용 중엔 일일 횟수 미차감. 개인 LLM 실패 시 502 (기본 LLM으로 자동 전환 안 함) |
+| 챗봇 횟수 버그 | 한국시간 자정 초기화, 조건부 UPDATE로 동시 요청 한도 초과 방지, 실패한 요청은 환불 |
+| Docker | app/web 512MB·db 768MB·각 1 CPU 상한(서버 `.env`로 조정), V8 힙 384MB, 로그 10MB×3 순환, app `DB_SSL=false` 명시 |
+| 테스트 | 110개 통과 (10/28 57개 → 53개 추가) |
+
+### 배포 전 필수 작업
+1. 운영 DB에 `migrations/20261029_add_user_llm_settings.sql` 실행.
+2. 운영 `.env.production`에 `LLM_KEY_ENCRYPTION_KEY` 추가 (`openssl rand -base64 32`). 다른 시크릿과 같이 백업 — 잃어버리면 사용자들이 등록한 키를 복호화할 수 없음. 없으면 개인 LLM만 비활성화되고 나머지는 정상 동작.
+3. 신규 LLM으로 바꿀 때: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` 추가 후 재시작. 롤백은 세 줄 삭제 후 재시작.
+4. 브랜치 머지 순서: `feature/handover-security` → `feature/llm-settings` → (Docker 배포로 확정되면) `docker` + `chore/docker-resource-limits`.
+   `docker` 브랜치의 `app.module.ts`는 `DB_SSL` 미설정을 SSL 끔으로, main 쪽은 SSL 켬으로 해석하므로 머지 시 충돌 → main 쪽(미설정=켬)을 택하고 compose에서 `DB_SSL=false`를 명시하는 현재 구성을 유지할 것.
+
+## 6. 남은 이슈 / 후속 작업
 
 ### 보안
 - [ ] **OAuth 콜백이 JWT를 URL 쿼리(`/auth/success?token=...`)로 전달** → 브라우저 기록·서버 로그·Referer로 노출 가능. 일회용 코드 교환이나 HttpOnly 쿠키 방식으로 변경 필요(프론트 수정 동반).
@@ -99,16 +123,19 @@ yarn lint && yarn test && yarn build
 - [ ] 운영 시크릿 보관 위치·접근자 확인 및 인수 후 키 교체(JWT_SECRET, OPENAI_API_KEY, R2, GitHub PAT, 관리자 비밀번호).
 
 ### 버그 / 품질
-- [ ] `ChatLimitGuard`: 날짜를 `toISOString()`(UTC)로 계산해서 일일 횟수가 **한국시간 오전 9시**에 초기화됨. 조회→증가가 원자적이지 않아 동시 요청 시 5회를 넘길 수 있고, LLM 호출이 실패해도 횟수가 차감됨.
+- [x] ~~`ChatLimitGuard` UTC 날짜·동시 요청·실패 시 차감 문제~~ → 10/29 수정.
+- [ ] 개인 LLM custom 주소는 DNS 검사와 실제 연결 사이에 DNS가 바뀌는 공격(DNS 리바인딩)까지 완전히 막지는 못함. 필요하면 서버에서 외부로 나가는 트래픽을 방화벽으로 제한.
 - [ ] 요청 제한 카운터가 메모리 저장이라 인스턴스가 늘면 인스턴스별로 따로 셈(현재 단일 인스턴스면 문제없음). 확장 시 Redis 저장소로 교체.
 - [ ] `README.md`가 Nest 기본 템플릿 위주 — 2절 내용으로 교체.
 
 ### 인프라 (10/28 미완료 — 서버 접근 필요)
 - [ ] 운영 배포 방식 확정(PM2 vs Docker Compose) 후 `docker` 브랜치 머지 여부 결정.
-- [ ] Docker 컨테이너 CPU·메모리 제한: 서버 사양 확인 후 compose에 `cpus`/`mem_limit` 추가.
+- [x] Docker 컨테이너 CPU·메모리 제한 → `chore/docker-resource-limits`. 서버 사양(`free -h`, `nproc`) 확인 후 기본값(2GB 기준) 조정 필요.
 - [ ] DB 백업·복구 절차 확인(Docker 볼륨 `pgdata` 기준이면 `pg_dump` cron 필요).
 - [ ] Nginx: 위 2개 사이트 설정 + `default`. HTTPS 인증서는 `www.qknou.kr` 하나로 `api.qknou.kr`까지 사용 중 — 인증서에 api 도메인이 포함돼 있는지 확인.
 
-### LLM (10/29)
-- [ ] 신규 LLM 제공자·모델·API 문서·키 (장대표님 요청 중).
-- [ ] 개인 LLM 등록 CRUD + API Key 암호화 저장.
+### LLM
+- [ ] 신규 LLM 정보 (보류). 받으면 환경변수 3개만 바꾸면 됨 — OpenAI 호환 API가 아니면 별도 작업 필요.
+- [x] 개인 LLM 등록 CRUD + API Key 암호화 저장 → 10/29.
+- [ ] 프론트: 개인 LLM 설정 화면, 챗봇 응답의 `usingPersonalLlm` 표시, 502/503/429 처리.
+- [ ] 실제 키로 개인 LLM 등록 성공 경로 확인 (로컬은 가짜 키로 실패 경로까지만 검증함).
