@@ -22,7 +22,15 @@ if [ -f docker-compose.yml ] && [ ! -f docker-compose.yml.frontend-draft.bak ]; 
   echo "기존 docker-compose.yml -> docker-compose.yml.frontend-draft.bak 으로 백업"
 fi
 
+# 자원 제한 기본값은 2GB 서버 기준. 사양이 다르면 $DEPLOY_DIR/.env 에
+# APP_MEM_LIMIT=1g 처럼 덮어쓰기 (compose가 같은 폴더의 .env를 자동으로 읽음).
 cat > docker-compose.yml <<'EOF'
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
 services:
   web:
     build:
@@ -35,6 +43,9 @@ services:
         # (프론트 Dockerfile도 이 ARG를 받아서 ENV로 넘기도록 되어있어야 함)
         API_PROXY_TARGET: http://app:9000
     restart: unless-stopped
+    mem_limit: ${WEB_MEM_LIMIT:-512m}
+    cpus: ${WEB_CPUS:-1.0}
+    logging: *default-logging
     environment:
       NODE_ENV: production
       PORT: '3000'
@@ -50,6 +61,14 @@ services:
     env_file:
       - ./qknou-BE/.env.production
     restart: unless-stopped
+    mem_limit: ${APP_MEM_LIMIT:-512m}
+    cpus: ${APP_CPUS:-1.0}
+    logging: *default-logging
+    environment:
+      NODE_OPTIONS: ${APP_NODE_OPTIONS:---max-old-space-size=384}
+      # 같은 compose 네트워크의 postgres 컨테이너는 SSL이 없음. main 브랜치는
+      # DB_SSL 미설정 시 SSL을 켜므로(Supabase 호환) 여기서 명시적으로 끈다.
+      DB_SSL: 'false'
     ports:
       - '127.0.0.1:9000:9000'
     depends_on:
@@ -61,6 +80,9 @@ services:
     restart: unless-stopped
     env_file:
       - ./.env.db
+    mem_limit: ${DB_MEM_LIMIT:-768m}
+    cpus: ${DB_CPUS:-1.0}
+    logging: *default-logging
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db-init:/docker-entrypoint-initdb.d:ro
