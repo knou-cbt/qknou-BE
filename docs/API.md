@@ -671,7 +671,7 @@ function ExampleText({ text }: { text: string }) {
 
 | key | 설명 | value 타입 | 옵션 | Nullable | 예시 |
 | --- | --- | --- | --- | --- | --- |
-| questionId | 현재 문제 ID | number | - | N | 101 |
+| questionId | 현재 문제 ID. 생략(또는 null)하면 문제와 무관한 일반 대화로 처리: 개념 캐시를 쓰지 않고, intent=recommend면 추천 대신 문제 화면에서 요청하라는 안내를 반환 | number | optional | Y | 101 |
 | message | 사용자 질문 (최대 1000자) | string | - | N | "DI가 뭐야?" |
 | history | 최근 대화 내역 (최대 20개, 각 content 최대 4000자) | array | optional | Y | - |
 | history[].role | 메시지 역할 | string ("user" \| "assistant") | - | N | "user" |
@@ -700,7 +700,17 @@ function ExampleText({ text }: { text: string }) {
 | data.recommendations[].examTitle | 시험 제목 | string | - | N |
 | data.recommendations[].year | 시험 연도 | number | - | N |
 | remainingCount | 오늘 남은 사용 횟수 (0~5) | number | - | N |
-| usingPersonalLlm | 개인 LLM으로 답변했는지 | boolean | - | N |
+| usingPersonalLlm | 사용자가 연결한 AI(사용자 키)로 답변했는지. true면 횟수 미차감 | boolean | - | N |
+| aiProvider | 답변한 AI 제공사 (`openrouter`\|`gemini`\|`openai`\|`anthropic`). 큐노 기본 AI면 null | string | - | Y |
+
+사용자 키로 답하다 실패하면 **큐노 기본 AI로 대체하지 않고** 아래처럼 `code`를 담아 응답합니다 (`{ "statusCode", "code", "message" }`).
+
+| status | code | 의미 |
+| --- | --- | --- |
+| 409 | AI_KEY_INVALID | 키가 삭제·만료됨 → 마이페이지에서 다시 연결 |
+| 429 | AI_QUOTA_EXCEEDED | 무료 한도 소진 또는 사용량 한도 도달 |
+| 402 | AI_BILLING_REQUIRED | 유료 제공사 크레딧/결제 필요 |
+| 502 | AI_PROVIDER_ERROR | 제공사 장애·타임아웃 |
 
 **Example - 개념 질문 (define)**
 
@@ -1636,57 +1646,71 @@ failed  → rejected
 
 ---
 
-## 38~41. 개인 LLM 설정
+## 38~41. 사용자 AI 연결 (BYOK)
 
-사용자가 자기 LLM API Key를 등록하면 **AI 튜터 챗봇(#16)에서만** 그 LLM으로 답변합니다. 문제 해설(#14~15)은 모든 사용자가 같이 보는 데이터라 항상 서비스 기본 LLM으로 생성합니다. 사용자당 설정 1개.
+사용자가 자기 AI 제공사 API Key를 연결하면 **AI 튜터 챗봇(#16)에서만** 그 AI로 답변합니다(일일 횟수 미차감). 문제 해설(#14~15)은 모든 사용자가 같이 보는 데이터라 항상 큐노 기본 AI로 생성합니다. FE: 마이페이지 `/mypage?tab=ai`.
 
 | 항목 | 내용 |
 | --- | --- |
-| **URL** | /api/users/me/llm-setting |
-| **인증** | JWT 필수 (본인 설정만 접근 가능). 관리자 전용 토큰은 403 |
-| **요청 제한** | 등록·수정은 외부 LLM 테스트 호출이 있어 분당 10회 |
+| **URL** | /api/users/me/ai-connections |
+| **인증** | JWT 필수 (본인 연결만 접근 가능). 관리자 전용 토큰은 403 |
+| **provider** | `openrouter` \| `gemini` \| `openai` \| `anthropic`. 그 외 값은 400 |
+| **요청 제한** | PUT은 외부 제공사 호출이 있어 사용자당 분당 5회 (초과 시 429) |
+| **키 노출** | 어떤 응답에도 평문 키 없음. `maskedKey` = 앞 4자 + "..." + 뒤 4자 (12자 이하 키는 "..." + 뒤 4자) |
 
-| # | Method | 설명 | 성공 |
-| --- | --- | --- | --- |
-| 38 | GET | 내 설정 조회. 없으면 404 | 200 |
-| 39 | POST | 등록. 이미 있으면 409 | 201 |
-| 40 | PATCH | 보낸 필드만 수정. `isEnabled`만 보내면 기본 LLM ↔ 개인 LLM 전환 | 200 |
-| 41 | DELETE | 삭제 (저장된 키도 삭제) | 204 |
-
-**Request - Body (POST / PATCH, PATCH는 전부 optional)**
-
-| key | 설명 | value 타입 | 옵션 | Nullable | 예시 |
-| --- | --- | --- | --- | --- | --- |
-| provider | `openai` \| `gemini` \| `custom`(그 외 OpenAI 호환 서버) | string | - | N | "openai" |
-| baseUrl | `custom`일 때 필수. https만, 내부망 주소 불가, `/v1`까지만 | string | optional | Y | "https://my-llm.example.com/v1" |
-| model | 모델 이름 | string | - | N | "gpt-4o-mini" |
-| apiKey | `openai`/`gemini`는 필수. 암호화 저장 | string | optional | Y | "sk-..." |
-| isEnabled | false면 등록만 해두고 기본 LLM 사용 (기본 true) | boolean | optional | Y | true |
-
-- 등록·수정 시 apiKey/model/baseUrl이 바뀌면 **저장 전에 실제로 한 번 호출해서 확인**하고, 실패하면 400으로 저장하지 않습니다.
-- `provider`나 `baseUrl`을 바꿀 때는 `apiKey`를 다시 보내야 합니다 (기존 키를 새 주소로 보내지 않기 위함).
-
-**Response (GET / POST / PATCH)**
-
-| key | 설명 | value 타입 | 옵션 | Nullable |
+| # | Method | Path | 설명 | 성공 |
 | --- | --- | --- | --- | --- |
-| success | 성공 여부 | boolean | - | N |
-| data.provider | 제공자 | string | - | N |
-| data.baseUrl | custom일 때만 값 | string | optional | Y |
-| data.model | 모델 이름 | string | - | N |
-| data.apiKeyMasked | 키 끝 4자리 (예: "…abcd"). 키 원문은 어떤 API로도 반환하지 않음. 12자 미만 키는 null | string | optional | Y |
-| data.isEnabled | 사용 여부 | boolean | - | N |
-| data.createdAt / updatedAt | 생성·수정 시각 | string | - | N |
+| 38 | GET | `/api/users/me/ai-connections` | 연결 목록 + 사용 중인 AI | 200 |
+| 39 | PUT | `/api/users/me/ai-connections/:provider` | 키 저장(연결). 같은 provider는 덮어씀 | 200 |
+| 40 | DELETE | `/api/users/me/ai-connections/:provider` | 연결 해제(키 물리 삭제). 없는 연결이어도 200 | 200 |
+| 41 | PATCH | `/api/users/me/ai-connections` | 사용할 AI 선택 | 200 |
+
+**GET / PATCH Response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "activeProvider": "gemini",
+    "connections": [
+      { "provider": "gemini", "maskedKey": "AIza...x9Qk", "connectedAt": "2026-10-30T09:00:00.000Z" }
+    ]
+  }
+}
+```
+
+- `activeProvider`가 null이면 큐노 기본 AI. 연결이 없으면 `{ "activeProvider": null, "connections": [] }`.
+
+**PUT Request / Response**
+
+```json
+// Request
+{ "apiKey": "sk-..." }
+
+// Response
+{ "success": true, "data": { "provider": "openai", "maskedKey": "sk-p...a1b2", "connectedAt": "2026-10-30T09:00:00.000Z" } }
+```
+
+- 앞뒤 공백 제거 후 10~512자, 중간 공백 없음.
+- 저장 전에 제공사 **목록 조회 API**로 키를 확인합니다(요금 없음, 타임아웃 5초): OpenAI `GET /v1/models`, Anthropic `GET /v1/models`, Gemini `GET /v1beta/models`, OpenRouter `GET /api/v1/key`.
+- 다시 저장하면 키만 교체되고 `connectedAt`은 처음 연결한 시각 그대로.
+- 사용 중인 AI가 없을 때(큐노 기본 AI) 처음 연결한 키는 바로 사용할 AI로 선택됩니다.
+
+**PATCH Request**
+
+```json
+{ "activeProvider": "openai" }   // null이면 큐노 기본 AI
+```
+
+**DELETE**: 응답 `{ "success": true }`. 사용 중이던 AI였다면 같은 트랜잭션에서 큐노 기본 AI로 돌아갑니다.
 
 **Status**
 
 | status | response content |
 | --- | --- |
-| 400 | 입력값 오류, https 아님/내부망 주소, 연결 확인 실패, provider·baseUrl 변경 시 apiKey 누락 |
+| 400 | 지원하지 않는 provider, 키 형식 오류, 제공사가 무효 키로 응답(PUT), 연결하지 않은 provider 선택(PATCH) |
 | 401 | 로그인 필요 |
 | 403 | 관리자 전용 토큰 |
-| 404 | 등록된 설정 없음 (GET/PATCH/DELETE) |
-| 409 | 이미 등록됨 (POST) |
-| 503 | 서버에 암호화 키(`LLM_KEY_ENCRYPTION_KEY`) 미설정으로 기능 비활성화 |
-
-**챗봇(#16)에서 개인 LLM 호출이 실패하면** `502`와 "등록한 개인 LLM 호출에 실패했습니다 (응답 코드 401)…" 메시지를 반환합니다 (기본 LLM으로 자동 전환하지 않음).
+| 429 | PUT 요청 제한 초과 |
+| 502 | 제공사 장애·타임아웃·제공사 쪽 요청 제한(PUT) — 키가 무효라고 단정하지 않음 |
+| 503 | 서버에 암호화 키(`AI_KEY_ENCRYPTION_KEY`) 미설정으로 기능 비활성화(PUT) |

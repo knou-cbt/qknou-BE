@@ -7,13 +7,13 @@ import { Term } from './entities/term.entity';
 import { Exam } from 'src/exams/entities/exam.entity';
 import { UserChatLimit } from './entities/chat-limit.entity';
 import { LlmModule } from 'src/llm/llm.module';
-import { LlmSettingsModule } from 'src/llm-settings/llm-settings.module';
+import { AiConnectionsModule } from 'src/ai-connections/ai-connections.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Questsion, Term, Exam, UserChatLimit]),
     LlmModule,
-    LlmSettingsModule,
+    AiConnectionsModule,
   ],
   controllers: [TutorController],
   providers: [TutorService],

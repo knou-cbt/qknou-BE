@@ -5,6 +5,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { AiProvider } from 'src/ai-connections/ai-providers';
 
 /**
  * provider, providerId를 저장해야 나중에 '이 사용자가 어떤걸로 로그인했는지' 알 수 있다.
@@ -36,6 +37,16 @@ export class User {
   // OAuth 제공자의 사용자 고유 ID
   @Column({ nullable: true })
   providerId: string;
+
+  // 튜터가 쓸 AI 제공사. null이면 큐노 기본 AI (src/ai-connections)
+  // 값이 있으면 user_ai_connections에 같은 provider 행이 반드시 있어야 함
+  @Column({
+    name: 'active_ai_provider',
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
+  activeAiProvider: AiProvider | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

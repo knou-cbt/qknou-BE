@@ -1,18 +1,22 @@
 import {
-  BadGatewayException,
+  HttpException,
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import {
   LlmConnection,
   LlmTarget,
   createLlmClient,
+  llmTimeoutMs,
   resolveDefaultLlmConnection,
   withProviderParams,
 } from './llm-client';
+import { completeWithAnthropic } from './anthropic-chat';
+import { toUserKeyError } from './user-key-error';
 
 // 동시에 LLM으로 나가는 요청 수 상한과, 그걸 넘었을 때 대기열 길이.
 // 대기열까지 차면 즉시 503으로 돌려보내 서버가 밀린 요청을 쌓아두지 않게 함.
@@ -49,8 +53,21 @@ export class LlmService {
     );
   }
 
-  /** 사용자 개인 LLM용 타깃. 재시도 없이 바로 실패하고, 리다이렉트는 따라가지 않음(SSRF 방지) */
+  /** 사용자 개인 키용 타깃. 재시도 없이 바로 실패하고, 리다이렉트는 따라가지 않음 */
   createPersonalTarget(connection: LlmConnection): LlmTarget {
+    if (connection.provider === 'anthropic') {
+      return {
+        client: new Anthropic({
+          apiKey: connection.apiKey,
+          timeout: llmTimeoutMs(this.configService),
+          maxRetries: 0,
+        }),
+        model: connection.model,
+        provider: 'anthropic',
+        isPersonal: true,
+        invalidKeyStatuses: connection.invalidKeyStatuses,
+      };
+    }
     return {
       client: createLlmClient(connection, this.configService, {
         maxRetries: 0,
@@ -59,6 +76,7 @@ export class LlmService {
       model: connection.model,
       provider: connection.provider,
       isPersonal: true,
+      invalidKeyStatuses: connection.invalidKeyStatuses,
     };
   }
 
@@ -68,6 +86,9 @@ export class LlmService {
   ): Promise<OpenAI.Chat.ChatCompletion> {
     await this.acquireSlot();
     try {
+      if (target.provider === 'anthropic') {
+        return await completeWithAnthropic(target.client, target.model, params);
+      }
       return await target.client.chat.completions.create(
         withProviderParams(target.provider, {
           ...params,
@@ -75,16 +96,13 @@ export class LlmService {
         }),
       );
     } catch (error) {
-      // 개인 LLM 오류(키 만료·모델명 오타 등)는 서버 장애가 아니라 사용자 설정 문제라
-      // 500 대신 502 + 원인을 알려줌. 응답 본문/키는 노출하지 않음.
-      if (target.isPersonal) {
-        const status =
-          error instanceof OpenAI.APIError && error.status
-            ? ` (응답 코드 ${error.status})`
-            : '';
-        throw new BadGatewayException(
-          `등록한 개인 LLM 호출에 실패했습니다${status}. 설정을 확인해주세요.`,
+      // 사용자 키 오류(키 삭제·한도 소진 등)는 서버 장애가 아니라 사용자 계정 문제라
+      // 500 대신 원인별 코드(AI_KEY_INVALID 등)로 알려줌. 응답 본문/키는 노출하지 않음.
+      if (target.isPersonal && !(error instanceof HttpException)) {
+        this.logger.warn(
+          `사용자 키 호출 실패 (${target.provider}, status ${(error as { status?: number })?.status ?? '-'})`,
         );
+        throw toUserKeyError(error, target.invalidKeyStatuses);
       }
       throw error;
     } finally {

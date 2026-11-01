@@ -85,7 +85,7 @@ async function bootstrap() {
     .addTag('feedbacks', '피드백 관련 API')
     .addTag('questions', '문항 관련 API')
     .addTag('exam-submissions', '시험지 등록 관련 API')
-    .addTag('llm-settings', '개인 LLM 설정 API')
+    .addTag('ai-connections', '사용자 AI 연결(BYOK) API')
     .addBearerAuth(
       {
         type: 'http',

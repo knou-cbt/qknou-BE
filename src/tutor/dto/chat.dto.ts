@@ -33,9 +33,14 @@ class ChatMessageDto {
 }
 
 export class TutorChatDto {
-  @ApiProperty({ description: '현재 문제 ID', example: 101 })
+  @ApiPropertyOptional({
+    description:
+      '현재 문제 ID. 생략하면 문제와 무관한 일반 대화로 처리(개념 캐시·관련 문제 추천 없음).',
+    example: 101,
+  })
+  @IsOptional()
   @IsInt()
-  questionId: number;
+  questionId?: number;
 
   @ApiProperty({
     description: `사용자 질문 (최대 ${MAX_MESSAGE_LENGTH}자)`,

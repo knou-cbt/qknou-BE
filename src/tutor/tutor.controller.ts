@@ -27,7 +27,7 @@ import { TutorChatDto } from './dto/chat.dto';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { AdminGuard } from 'src/auth/guards/admin.guard';
 import { ChatLimitGuard } from './guards/chat-limit.guard';
-import { LlmSettingsService } from 'src/llm-settings/llm-settings.service';
+import { AiConnectionsService } from 'src/ai-connections/ai-connections.service';
 import { DAILY_CHAT_LIMIT } from './chat-limit-date';
 
 @ApiTags('tutor')
@@ -35,7 +35,7 @@ import { DAILY_CHAT_LIMIT } from './chat-limit-date';
 export class TutorController {
   constructor(
     private readonly tutorService: TutorService,
-    private readonly llmSettingsService: LlmSettingsService,
+    private readonly aiConnectionsService: AiConnectionsService,
     @InjectRepository(Questsion)
     private questionRepository: Repository<Questsion>,
   ) {}
@@ -109,7 +109,7 @@ export class TutorController {
   @ApiOperation({
     summary: 'AI 튜터 챗봇 (로그인 필수, 일 5회 제한)',
     description:
-      '현재 문제 기반으로 개념 질문, 해설 질문, 비교, 관련 문제 추천 등을 처리합니다. 로그인한 사용자만 사용 가능하며 하루 5회(한국시간 자정 초기화)로 제한됩니다. 답변 생성에 실패하면 횟수가 차감되지 않습니다. 개인 LLM을 사용 중이면 그 LLM으로 답하고 횟수를 차감하지 않습니다.',
+      '현재 문제 기반으로 개념 질문, 해설 질문, 비교, 관련 문제 추천 등을 처리합니다. 로그인한 사용자만 사용 가능하며 하루 5회(한국시간 자정 초기화)로 제한됩니다. 답변 생성에 실패하면 횟수가 차감되지 않습니다. 마이페이지에서 연결한 AI(사용자 키)를 사용 중이면 그 AI로 답하고 횟수를 차감하지 않으며, 실패해도 기본 AI로 대체하지 않고 code(AI_KEY_INVALID 등)와 함께 오류를 반환합니다.',
   })
   @ApiResponse({
     status: 200,
@@ -123,6 +123,7 @@ export class TutorController {
         },
         remainingCount: 4,
         usingPersonalLlm: false,
+        aiProvider: null,
       },
     },
   })
@@ -131,12 +132,30 @@ export class TutorController {
     status: 403,
     description: '일일 사용 횟수 초과 (5회 제한)',
   })
+  @ApiResponse({
+    status: 409,
+    description: '사용자 키 무효 { code: "AI_KEY_INVALID" } → 다시 연결 필요',
+  })
+  @ApiResponse({
+    status: 402,
+    description:
+      '사용자 AI 계정 크레딧/결제 필요 { code: "AI_BILLING_REQUIRED" }',
+  })
+  @ApiResponse({
+    status: 429,
+    description:
+      '요청 제한 초과, 또는 사용자 AI 한도 소진 { code: "AI_QUOTA_EXCEEDED" }',
+  })
+  @ApiResponse({
+    status: 502,
+    description: '사용자 AI 제공사 장애 { code: "AI_PROVIDER_ERROR" }',
+  })
   async chat(@Body() dto: TutorChatDto, @Req() req: any) {
     const userId = req.user.id;
     let result: Awaited<ReturnType<TutorService['chat']>>;
     try {
       const personalTarget = req.usingPersonalLlm
-        ? await this.llmSettingsService.resolveTarget(userId)
+        ? await this.aiConnectionsService.resolveTarget(userId)
         : null;
       result = await this.tutorService.chat(
         dto.questionId,
@@ -159,6 +178,7 @@ export class TutorController {
       data: result,
       remainingCount: req.remainingCount,
       usingPersonalLlm: Boolean(req.usingPersonalLlm),
+      aiProvider: req.aiProvider ?? null,
     };
   }
 

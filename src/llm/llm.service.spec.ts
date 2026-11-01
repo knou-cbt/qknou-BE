@@ -1,8 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import {
-  BadGatewayException,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { ServiceUnavailableException } from '@nestjs/common';
 import OpenAI from 'openai';
 import { LlmService } from './llm.service';
 import { LlmTarget } from './llm-client';
@@ -70,7 +67,7 @@ describe('LlmService', () => {
     expect(create.mock.calls[1][0]).not.toHaveProperty('chat_template_kwargs');
   });
 
-  it('개인 LLM 오류는 키/본문 노출 없이 502로 바꾼다', async () => {
+  it('사용자 키 오류는 키/본문 노출 없이 502 AI_PROVIDER_ERROR로 바꾼다', async () => {
     const service = makeService({});
     const create = jest
       .fn()
@@ -80,8 +77,9 @@ describe('LlmService', () => {
       .complete(makeTarget(create, { isPersonal: true }), { messages: [] })
       .catch((e) => e);
 
-    expect(error).toBeInstanceOf(BadGatewayException);
-    expect(error.message).not.toContain('sk-secret');
+    expect(error.getStatus()).toBe(502);
+    expect(error.getResponse().code).toBe('AI_PROVIDER_ERROR');
+    expect(JSON.stringify(error.getResponse())).not.toContain('sk-secret');
   });
 
   it('기본 LLM 오류는 그대로 던진다', async () => {
