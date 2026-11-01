@@ -13,7 +13,7 @@
 | LLM | `openai` SDK로 OpenAI 호환 API 호출. 기본 LLM은 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`(없으면 기존 `VLLM_*`/`OPENAI_*`). 모든 호출은 `src/llm/llm.service.ts` 경유. 사용자 개인 LLM은 `src/llm-settings/` |
 | 파일 저장소 | Cloudflare R2 (`R2_*` 환경변수, `src/storage`) |
 | 모니터링 | Sentry(`SENTRY_DSN`), New Relic(`NEW_RELIC_LICENSE_KEY`) — 둘 다 값이 있을 때만 활성화 |
-| 기타 연동 | 피드백 → GitHub Issue(`GITHUB_*`), Discord Webhook(`DISCORD_WEBHOOK_URL`) |
+| 기타 연동 | 피드백 → GitHub 저장소 md 파일(`GITHUB_*`), Discord Webhook(`DISCORD_WEBHOOK_URL`) |
 
 ### 브랜치
 

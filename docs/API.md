@@ -14,7 +14,7 @@
 | 17 | Tutor | 남은 챗봇 사용 횟수 조회 |
 | 18 | Tutor | 오래된 챗봇 사용 데이터 삭제 (관리자용) |
 | 19~21 | Health | 서버 상태, 성능 측정 (관리자용), DB 연결 (관리자용) |
-| 22 | 피드백 | 피드백 제출 (GitHub Issue 자동 생성) |
+| 22 | 피드백 | 피드백 제출 (GitHub 저장소에 md 파일 생성) |
 | 23~28 | 시험지 등록 | 업로드(중복 검증 내부 처리), 관리자 검수/수정/게시/반려 |
 | 29~31 | 업데이트 알림 | 활성 공지 조회, 내역 적재(관리자), 공지 발행(관리자) |
 | 32~33 | 마이페이지 | 풀이 기록 목록(누적, 검색/페이지네이션) + 상세 조회 |
@@ -961,7 +961,7 @@ function ExampleText({ text }: { text: string }) {
 | --- | --- |
 | **Method** | POST |
 | **URL** | /api/feedbacks |
-| **설명** | 피드백/문항 이상 제보를 접수합니다. 접수 즉시 전용 GitHub 레포에 Issue를 자동 생성하고 Discord 웹훅으로 알림을 보냅니다. GitHub/Discord 연동이 실패해도 접수(DB 저장) 자체는 성공 처리됩니다. **로그인 필수** (제출 횟수 제한 없음) |
+| **설명** | 피드백/문항 이상 제보를 접수합니다. 접수 즉시 전용 GitHub 저장소에 md 파일로 커밋하고 Discord 웹훅으로 알림을 보냅니다. GitHub/Discord 연동이 실패해도 접수(DB 저장) 자체는 성공 처리됩니다. **로그인 필수** (제출 횟수 제한 없음) |
 | **인증** | JWT Bearer Token 필수 |
 
 **Request - Header**
@@ -979,41 +979,38 @@ function ExampleText({ text }: { text: string }) {
 | questionId | 문항 ID (문항 관련 제보일 때) | number | optional | Y | 101 |
 | pageUrl | 제보 시점 페이지 URL (최대 2000자) | string | optional | Y | "https://qknou.kr/exams/1" |
 
-**type → GitHub 라벨 매핑**
+**저장 방식: GitHub 저장소에 md 파일로 커밋**
 
-| type | GitHub 라벨 |
+피드백 1건 = md 파일 1개. `GITHUB_OWNER`/`GITHUB_REPO` 저장소(private)에 Contents API로 커밋합니다. 같은 문항 제보도 합치지 않고 각각 파일로 남기며, 문항별로 보려면 frontmatter의 `question_id`로 검색합니다.
+
+- 경로: `feedback/<YYYY-MM>/<YYYY-MM-DD>-<id>-<type>.md` (한국시간 날짜, `id`는 피드백 ID라 동시에 들어와도 겹치지 않음)
+- 커밋 메시지: `feedback: #<id> <type>`
+
+````markdown
+---
+id: 12
+type: question_bug
+reporter_id: "{userId}"
+question_id: 101
+page_url: "https://qknou.kr/exams/1"
+created_at: 2026-11-01T01:00:00.000Z
+---
+
+# [문항-버그] 문항 #101
+
+```
+3번 선택지 정답 표기가 이상해요
+```
+````
+
+| type | 제목 라벨 |
 | --- | --- |
 | question_bug | 문항-버그 |
 | site_bug | 사이트-버그 |
 | suggestion | 기능-제안 |
 | other | 기타 |
 
-> ⚠️ 라벨은 레포에 미리 수동으로 생성해둬야 합니다 (없는 라벨을 issue 생성 API에 넘기면 422 에러).
-
-**개인정보 처리 방침**: GitHub Issue 본문/댓글에는 사용자 **이메일을 넣지 않고 내부 `userId`(UUID)만** 표시합니다. 실제 신원 확인이 필요하면 관리자가 DB에서 `userId`로 조회합니다 (private 레포라도 PII를 외부 서비스에 그대로 보관하지 않기 위함). 또한 사용자가 작성한 `content` 원문은 GitHub 마크다운/멘션(`@누군가`)이 그대로 해석되지 않도록 코드 블록으로 감싸서 전송합니다.
-
-**동일 문항 중복 제보 처리**
-
-`type=question_bug`이고 `questionId`가 있는 경우, 같은 문항에 대해 여러 사용자가 각자 이슈를 새로 만들지 않도록 아래 순서로 처리합니다.
-
-1. 같은 `questionId`로 저장된 가장 최근 `feedbacks` row에 연결된 `github_issue_number`가 있는지 조회
-2. 있으면 GitHub API로 해당 이슈가 아직 **open** 상태인지 확인
-3. open이면 → 새 이슈를 만들지 않고 **기존 이슈에 댓글만 추가**, 이번 제보의 `feedbacks` row는 그 기존 `github_issue_number`를 그대로 참조
-   - 댓글에는 반드시 이번 제보자가 작성한 **원문 content를 그대로**(코드 블록으로 감싸서) 포함해야 합니다. 같은 문항이어도 신고자마다 지적하는 내용이나 의견(예: 정답이 2번이라는 사람 vs 4번이라는 사람)이 다를 수 있으므로, "추가 제보가 있습니다" 같은 요약/알림성 댓글로 뭉개면 안 됩니다.
-   - 댓글 포맷 예시:
-     ```
-     **추가 제보** (2026-09-05 10:32)
-     - 제보자 ID: {userId}
-     - 내용:
-     ```
-     {content}
-     ```
-     - 페이지: {pageUrl}
-     ```
-4. closed거나 기존 이슈가 없으면 → 새 이슈 생성
-5. 2번의 GitHub API 조회 자체가 실패하면(네트워크 오류 등) → 안전하게 "기존 이슈 없음"으로 간주하고 새 이슈 생성 (제보 자체가 실패하면 안 됨)
-
-> ⚠️ **알려진 한계**: 같은 문항에 대한 두 제보가 완전히 동시에 들어오면(수 밀리초 이내) 위 1~2번 조회가 서로를 못 보고 이슈가 중복 생성될 수 있습니다. 외부 HTTP 호출(GitHub API)을 DB 트랜잭션 안에 넣기 어려워서 완전히 막지는 않았고, 빈도가 낮고 피해도 "이슈 하나 중복 생성" 정도라 지금은 감수합니다.
+**개인정보 처리 방침**: 파일에는 사용자 **이메일을 넣지 않고 내부 `userId`(UUID)만** 기록합니다. 실제 신원 확인이 필요하면 관리자가 DB에서 `userId`로 조회합니다. 사용자가 작성한 `content` 원문은 GitHub 화면에서 마크다운/HTML로 해석되지 않도록 코드 블록으로 감싸고, frontmatter 값은 JSON 문자열로 넣습니다.
 
 **Response**
 
@@ -1022,8 +1019,8 @@ function ExampleText({ text }: { text: string }) {
 | success | 성공 여부 | boolean | - | N |
 | data.id | 피드백 ID | number | - | N |
 | data.type | 피드백 유형 | string | - | N |
-| data.githubIssueUrl | 연결된 GitHub Issue URL. `integrationStatus`가 'failed'면 null | string | optional | Y |
-| data.integrationStatus | GitHub 연동 결과: "created"(새 이슈 생성) \| "merged"(기존 이슈에 댓글로 병합) \| "failed"(GitHub 연동 실패, 접수는 성공했지만 이슈 없음) | string | - | N |
+| data.githubIssueUrl | 생성된 md 파일의 GitHub URL (이름은 FE 호환을 위해 유지). `integrationStatus`가 'failed'면 null | string | optional | Y |
+| data.integrationStatus | GitHub 연동 결과: "created"(md 파일 생성) \| "failed"(GitHub 연동 실패, 접수는 성공했지만 파일 없음) | string | - | N |
 | data.createdAt | 생성일 | string (ISO 8601) | - | N |
 
 **Example**
@@ -1045,7 +1042,7 @@ Response:
   "data": {
     "id": 12,
     "type": "question_bug",
-    "githubIssueUrl": "https://github.com/{org}/qknou-feedback/issues/45",
+    "githubIssueUrl": "https://github.com/{owner}/qknou-feedback/blob/main/feedback/2026-09/2026-09-05-12-question_bug.md",
     "integrationStatus": "created",
     "createdAt": "2026-09-05T10:00:00+09:00"
   }
