@@ -13,7 +13,7 @@
 | LLM | `openai` SDK로 OpenAI 호환 API 호출. 기본 LLM은 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`(없으면 기존 `VLLM_*`/`OPENAI_*`). 모든 호출은 `src/llm/llm.service.ts` 경유. 사용자 개인 LLM은 `src/llm-settings/` |
 | 파일 저장소 | Cloudflare R2 (`R2_*` 환경변수, `src/storage`) |
 | 모니터링 | Sentry(`SENTRY_DSN`), New Relic(`NEW_RELIC_LICENSE_KEY`) — 둘 다 값이 있을 때만 활성화 |
-| 기타 연동 | 피드백 → GitHub Issue(`GITHUB_*`), Discord Webhook(`DISCORD_WEBHOOK_URL`) |
+| 기타 연동 | 피드백 → GitHub 저장소 md 파일(`GITHUB_*`), Discord Webhook(`DISCORD_WEBHOOK_URL`) |
 
 ### 브랜치
 
@@ -35,7 +35,55 @@
                                           └─ db: postgres:17 컨테이너 (127.0.0.1:5432)
 ```
 
-⚠️ **확인 필요**: 운영 서버가 지금 어느 방식으로 돌고 있는지 불명확하다. GitHub Actions는 `main`을 PM2(`~/qknou-BE`)로 배포하지만, `docker` 브랜치는 `/opt/qknou`에서 Docker Compose로 돌리는 구성이다. `deploy.sh`는 저장소에 없고 서버에만 있다. 서버 접속 후 `pm2 list`, `docker ps`, `/etc/nginx/sites-enabled/`로 실제 상태를 확인해야 한다.
+~~⚠️ 확인 필요: 운영 서버가 PM2인지 Docker Compose인지 불명확~~ → 11/01 확인: Docker Compose, 서버 관리자(wyjang)가 운영. 아래 "운영 배포 / 환경변수 변경" 참고.
+
+### 운영 배포 / 환경변수 변경 (11/01부터)
+
+서버 관리자 운영 전달문(2026-11-01) 기준. jes는 개발과 업로드까지, 서버 반영은 자동 승격 스크립트(`bin/promote`, 관리자 영역)가 한다.
+
+- 접속: `ssh jes@<서버 주소>` (호스트명 `r640`). 11/01부터 **키 인증만** 됨 — 새 PC는 공개키(`~/.ssh/id_ed25519.pub`)를 관리자에게 전달.
+- 운영 서버의 프론트에서 백엔드로 가는 경로는 `https://www.qknou.kr/api-proxy/*`. `api.qknou.kr`은 외부에서 차단(444)되어 있으므로 OAuth 콜백 등 외부에서 들어오는 주소는 모두 `www.qknou.kr/api-proxy/...`로 등록.
+- jes 계정은 `/opt/qknou/dev/`에만 쓸 수 있음. `staging/`, `prod/`(운영 env 포함), `archive/`, 서버의 소스 디렉터리는 볼 수 없음 → 운영 env 값은 직접 읽어서 확인할 수 없고, 동작으로 확인해야 함.
+- 이미지 재빌드가 필요한 배포(`qknou-app.tar.gz`, `SHA256SUMS`, `*.sql`)도 같은 폴더 방식. 빌드 명령은 운영 전달문 3절 참고(`--platform linux/amd64` 필수).
+
+**환경변수만 바꾸는 절차** (예: 11/01 Google OAuth 클라이언트 교체, 릴리스 `20261101-4`)
+
+1. 안 쓴 릴리스 이름 고르기. 형식 `YYYYMMDD-<순번>`, 한 번 쓴 이름은 재사용 불가(실패한 것 포함).
+   ```bash
+   ssh jes@<서버 주소> 'grep -oE "20261101-[0-9]+" /opt/qknou/promote.log | sort -uV'
+   ```
+2. 로컬에 폴더를 만들고 `env.changes`(바꿀 변수만, 한 줄에 `KEY=VALUE`)와 `RELEASE.md`(항상 필수)를 작성. 저장소 밖(임시 폴더)에서 만들 것.
+   ```bash
+   mkdir 20261101-4 && cd 20261101-4
+   umask 077
+   cat > env.changes <<'EOF'
+   GOOGLE_CLIENT_ID=...
+   GOOGLE_CLIENT_SECRET=...
+   EOF
+   chmod 600 env.changes   # 600이 아니면 검증 실패
+   ```
+   `RELEASE.md`에는 변경 내용, 이미지 변경 여부, DB 마이그레이션 여부, 환경변수 변경 여부를 적는다. 비밀값 자체는 적지 않는다.
+3. 업로드(`-p`로 권한 유지) 후 권한 확인.
+   ```bash
+   cd .. && scp -rp 20261101-4 jes@<서버 주소>:/opt/qknou/dev/
+   ssh jes@<서버 주소> 'ls -l /opt/qknou/dev/20261101-4/'   # env.changes가 -rw------- 인지
+   ```
+4. 업로드가 끝난 뒤 `READY` 생성 → 자동 반영 시작(검증 → staging → env 백업 → `app.env` 적용 → 재기동 → 헬스체크, 실패 시 자동 롤백).
+   ```bash
+   ssh jes@<서버 주소> 'touch /opt/qknou/dev/20261101-4/READY'
+   ```
+5. 결과 확인. 성공하면 로그에 `prod 반영 완료 (www 200, api health 200, app healthy)`가 남고 dev에서 폴더가 사라진다(env만 바꿀 때 약 30초).
+   ```bash
+   ssh jes@<서버 주소> 'grep 20261101-4 /opt/qknou/promote.log | tail'   # 요약은 cat /opt/qknou/status.txt
+   ```
+   검증 실패 시 폴더 안에 `FAILED`(원인 포함)와 `READY.failed`가 생긴다. 고친 뒤 두 파일을 지우고 `READY`를 다시 만들면 재시도.
+6. 실제 동작으로 확인. 예: Google 키는 아래 응답의 `client_id`가 새 값인지 확인.
+   ```bash
+   curl -s -o /dev/null -w "%{redirect_url}\n" https://www.qknou.kr/api-proxy/auth/google
+   ```
+7. 관리자에게 업로드한 폴더 이름을 알린다.
+
+비밀값은 메신저·메일·이미지로 보내지 말고 `env.changes`로만 전달한다. 업로드가 끝나면 로컬 사본은 지운다.
 
 ## 2. 로컬 개발 환경
 
@@ -112,7 +160,16 @@ yarn lint && yarn test && yarn build
 5. `.github/workflows/deploy.yml`은 PM2 기준(`~/qknou-BE`, `deploy.sh`, `pm2 save`)이라 Docker 운영과 맞지 않음. `main` push 때 실행되므로 서버에 옛 PM2 프로세스가 남아 있지 않은지 확인 후 Docker 배포 방식으로 교체 필요.
 6. 프론트 `/api/tutor/*` 라우트가 백엔드 호출 시 `X-Forwarded-For`를 전달하지 않음 → 지금은 내부 요청으로 간주돼 IP당 분당 제한이 빠짐(일일 5회 제한은 사용자 기준이라 그대로). 프론트에서 헤더를 넘기면 IP당 제한이 다시 적용됨.
 
-## 6. 남은 이슈 / 후속 작업
+## 6. 11/01 운영 반영
+
+| 릴리스 | 내용 |
+| --- | --- |
+| `20261101-4` | Google OAuth 클라이언트를 jes 소유 GCP 프로젝트(`qknou-513408`)의 새 클라이언트(`444580444352-m0ru…`)로 교체. 기존 클라이언트(`1008059963091-j46a…`)에 www 콜백이 없어 `redirect_uri_mismatch` 발생하던 문제. 새 클라이언트의 승인된 리디렉션 URI: `http://localhost:3001/auth/google/callback`(로컬, PORT=3001), `https://api.qknou.kr/auth/google/callback`, `https://www.qknou.kr/api-proxy/auth/google/callback`(운영). 반영 후 `client_id` 교체 확인. |
+
+- Google 클라이언트 보안 비밀번호는 콘솔에서 다시 볼 수 없음 → 분실 시 콘솔의 "Add secret"으로 새로 발급해 위 절차로 교체.
+- 운영 전달문의 남은 요청: Kakao Redirect URI(`https://www.qknou.kr/api-proxy/auth/kakao/callback`) 등록, OpenAI 키 교체(401), 피드백용 GitHub 토큰을 조직·봇 계정 토큰으로 교체.
+
+## 7. 남은 이슈 / 후속 작업
 
 ### 보안
 - [ ] **OAuth 콜백이 JWT를 URL 쿼리(`/auth/success?token=...`)로 전달** → 브라우저 기록·서버 로그·Referer로 노출 가능. 일회용 코드 교환이나 HttpOnly 쿠키 방식으로 변경 필요(프론트 수정 동반).
@@ -130,7 +187,7 @@ yarn lint && yarn test && yarn build
 - [ ] `README.md`가 Nest 기본 템플릿 위주 — 2절 내용으로 교체.
 
 ### 인프라 (10/28 미완료 — 서버 접근 필요)
-- [ ] 운영 배포 방식 확정(PM2 vs Docker Compose) 후 `docker` 브랜치 머지 여부 결정.
+- [x] ~~운영 배포 방식 확정(PM2 vs Docker Compose)~~ → 11/01: Docker Compose + 관리자 자동 승격. 1절 "운영 배포 / 환경변수 변경" 참고.
 - [x] Docker 컨테이너 CPU·메모리 제한 → `chore/docker-resource-limits`. 서버 사양(`free -h`, `nproc`) 확인 후 기본값(2GB 기준) 조정 필요.
 - [ ] DB 백업·복구 절차 확인(Docker 볼륨 `pgdata` 기준이면 `pg_dump` cron 필요).
 - [ ] Nginx: 위 2개 사이트 설정 + `default`. HTTPS 인증서는 `www.qknou.kr` 하나로 `api.qknou.kr`까지 사용 중 — 인증서에 api 도메인이 포함돼 있는지 확인.

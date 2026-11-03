@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FeedbacksController } from './feedbacks.controller';
 import { FeedbacksService } from './feedbacks.service';
-import { GithubIssuesService } from './github-issues.service';
+import { GithubFeedbackFilesService } from './github-feedback-files.service';
 import { DiscordNotifyModule } from 'src/notifications/discord-notify.module';
 import { Feedback } from './entities/feedback.entity';
 import { Questsion } from 'src/questions/entities/question.entity';
@@ -13,6 +13,6 @@ import { Questsion } from 'src/questions/entities/question.entity';
     DiscordNotifyModule,
   ],
   controllers: [FeedbacksController],
-  providers: [FeedbacksService, GithubIssuesService],
+  providers: [FeedbacksService, GithubFeedbackFilesService],
 })
 export class FeedbacksModule {}
