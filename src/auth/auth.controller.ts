@@ -223,7 +223,6 @@ export class AuthController {
         message: 'JWT 인증 성공!',
         user: {
           id: 'uuid',
-          email: 'user@example.com',
           name: '홍길동',
         },
       },

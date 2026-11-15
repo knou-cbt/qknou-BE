@@ -146,7 +146,7 @@ export class ExamSubmissionsService {
     const items = await baseQb
       .clone()
       .select('submission.id', 'id')
-      .addSelect('user.email', 'uploaderEmail')
+      .addSelect('user.name', 'uploaderName')
       .addSelect('subject.name', 'subjectName')
       .addSelect('submission.year', 'year')
       .addSelect('submission.exam_type', 'examType')
