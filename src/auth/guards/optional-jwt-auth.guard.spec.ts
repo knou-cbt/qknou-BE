@@ -24,7 +24,7 @@ describe('OptionalJwtAuthGuard', () => {
 
   it('헤더가 있고 유효하면 user를 그대로 반환한다', () => {
     const context = createContext({ authorization: 'Bearer valid-token' });
-    const user = { id: 'u1', email: 'a@test.com' };
+    const user = { id: 'u1', name: '테스트' };
     const result = guard.handleRequest(null, user, null, context);
     expect(result).toBe(user);
   });

@@ -9,7 +9,7 @@
 | 프레임워크 | NestJS 10 + TypeORM 0.3 (PostgreSQL) |
 | 런타임 | Node 20 (CI·Dockerfile 기준). 로컬 Node 22에서도 빌드·테스트 통과 |
 | 패키지 매니저 | **Yarn 1 (classic)** — `yarn.lock` v1 |
-| 인증 | 구글/카카오 OAuth → 자체 JWT 발급(기본 7일). 관리자는 `ADMIN_EMAIL` 일치 또는 아이디/비밀번호 로그인(`role: admin` 토큰) |
+| 인증 | 구글/카카오 OAuth → 자체 JWT 발급(기본 7일). 관리자는 아이디/비밀번호 로그인(`role: admin` 토큰)만. 사용자 이메일은 수집하지 않음(11/15) |
 | LLM | `openai` SDK로 OpenAI 호환 API 호출. 기본 LLM은 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`(없으면 기존 `VLLM_*`/`OPENAI_*`). 모든 호출은 `src/llm/llm.service.ts` 경유. 사용자 개인 LLM은 `src/llm-settings/` |
 | 파일 저장소 | Cloudflare R2 (`R2_*` 환경변수, `src/storage`) |
 | 모니터링 | Sentry(`SENTRY_DSN`), New Relic(`NEW_RELIC_LICENSE_KEY`) — 둘 다 값이 있을 때만 활성화 |

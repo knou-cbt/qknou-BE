@@ -25,7 +25,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   async validate(payload: any) {
     // 관리자 로그인(아이디/비밀번호)으로 발급된 토큰은 users 테이블 조회 없이 처리
     if (payload.role === 'admin') {
-      return { id: 'admin', email: null, name: '관리자', role: 'admin' };
+      return { id: 'admin', name: '관리자', role: 'admin' };
     }
 
     //DB에서 사용자 확인(탈퇴했거나 없는 사용자면 거부)
@@ -36,7 +36,6 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     // req.user에 담길 정보(컨트롤러에서 사용)
     return {
       id: user.id,
-      email: user.email,
       name: user.name,
     };
   }

@@ -578,7 +578,7 @@ function ExampleText({ text }: { text: string }) {
 | --- | --- |
 | **Method** | GET |
 | **URL** | /api/tutor/questions/:id/explanation |
-| **설명** | 특정 문제의 해설 조회. DB에 해설이 없으면 AI로 실시간 생성 후 반환합니다. 생성 시 concept_tags도 함께 추출됩니다. |
+| **설명** | 특정 문제의 저장된 해설 조회. 11/15부터 실시간 생성은 기본적으로 꺼져 있어, 해설이 없으면 503을 반환합니다(`EXPLANATION_ON_DEMAND=true`일 때만 AI로 생성). 해설은 관리자 일괄 생성 API(`POST /api/tutor/explanations/backfill`)로 미리 채웁니다. |
 
 **Request - Path parameter**
 
@@ -612,6 +612,17 @@ function ExampleText({ text }: { text: string }) {
 | --- | --- |
 | 200 | 해설 조회/생성 성공 |
 | 404 | 문제를 찾을 수 없습니다 |
+| 503 | 해설이 아직 준비되지 않음 (실시간 생성 꺼짐) |
+
+### 관리자 - 해설 일괄 생성 (11/15 추가, 관리자 토큰 필요)
+
+| Method | URL | 설명 |
+| --- | --- | --- |
+| GET | /api/tutor/explanations/backfill | `missing`(해설 없는 문제 수)과 `job`(진행 상태: running, target, succeeded, failed, failedIds, stopReason) |
+| POST | /api/tutor/explanations/backfill | 백그라운드로 시작, 202 반환. body(선택): `limit`(최대 생성 수), `concurrency`(1~5, 기본 2). 진행 중이면 409 |
+| POST | /api/tutor/explanations/backfill/stop | 진행 중인 작업 중지 요청 |
+
+LLM 오류가 10번 연속 나면 `stopReason: too-many-failures`로 스스로 멈춥니다. 실패한 문제는 다시 시작하면 재시도됩니다.
 
 ---
 
@@ -1151,7 +1162,7 @@ failed  → rejected
 | --- | --- | --- | --- | --- |
 | success | 성공 여부 | boolean | - | N |
 | data.items[].id | 등록 ID | number | - | N |
-| data.items[].uploaderEmail | 업로드한 사용자 이메일 | string | - | N |
+| data.items[].uploaderName | 업로드한 사용자 이름(닉네임) | string | - | Y |
 | data.items[].subjectName | 과목명 | string | - | N |
 | data.items[].year | 연도 | number | - | N |
 | data.items[].examType | 시험 종류 | number | - | N |

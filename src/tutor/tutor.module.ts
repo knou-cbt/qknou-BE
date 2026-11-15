@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TutorService } from './tutor.service';
 import { TutorController } from './tutor.controller';
+import { ExplanationBackfillService } from './explanation-backfill.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Questsion } from 'src/questions/entities/question.entity';
 import { Term } from './entities/term.entity';
@@ -16,7 +17,7 @@ import { LlmSettingsModule } from 'src/llm-settings/llm-settings.module';
     LlmSettingsModule,
   ],
   controllers: [TutorController],
-  providers: [TutorService],
+  providers: [TutorService, ExplanationBackfillService],
   exports: [TutorService],
 })
 export class TutorModule {}

@@ -26,7 +26,8 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       callbackURL: configService.get('GOOGLE_CALLBACK_URL'),
 
       //구글에게 요청할 정보 범위
-      scope: ['email', 'profile'], // ✅ profile 추가!
+      // 이메일은 수집하지 않음 — 이름·고유 ID만 받는다
+      scope: ['profile'],
     });
   }
 
@@ -45,7 +46,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     profile: any, //구글에서 받은 사용자 정보
     done: VerifyCallback, //Passport에게 결과 전달하는 콜백
   ): Promise<any> {
-    const { id, displayName, name, emails } = profile;
+    const { id, displayName, name } = profile;
 
     // 이름 안전하게 추출 (name이 없을 수도 있음)
     let userName = displayName; // 기본값: displayName 사용
@@ -59,7 +60,6 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     const oauthUser = {
       provider: 'google',
       providerId: id,
-      email: emails?.[0]?.value || null, // emails가 없을 수도 있음
       name: userName || 'Google User', // 이름이 없으면 기본값
       profileImage: null,
     };
