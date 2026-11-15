@@ -10,7 +10,10 @@ import {
   Req,
   Query,
   Delete,
+  HttpCode,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { TutorService } from './tutor.service';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -29,6 +32,8 @@ import { AdminGuard } from 'src/auth/guards/admin.guard';
 import { ChatLimitGuard } from './guards/chat-limit.guard';
 import { LlmSettingsService } from 'src/llm-settings/llm-settings.service';
 import { DAILY_CHAT_LIMIT } from './chat-limit-date';
+import { ExplanationBackfillService } from './explanation-backfill.service';
+import { BackfillExplanationsDto } from './dto/backfill-explanations.dto';
 
 @ApiTags('tutor')
 @Controller('api/tutor')
@@ -36,20 +41,31 @@ export class TutorController {
   constructor(
     private readonly tutorService: TutorService,
     private readonly llmSettingsService: LlmSettingsService,
+    private readonly explanationBackfill: ExplanationBackfillService,
+    private readonly configService: ConfigService,
     @InjectRepository(Questsion)
     private questionRepository: Repository<Questsion>,
   ) {}
 
+  /**
+   * 사용자 요청 시 해설을 실시간 생성할지. 기본은 막음(false) —
+   * 해설은 관리자 일괄 생성(POST explanations/backfill)으로 미리 채워 둔다.
+   * 다시 열려면 EXPLANATION_ON_DEMAND=true.
+   */
+  private get onDemandGenerationEnabled(): boolean {
+    return this.configService.get<string>('EXPLANATION_ON_DEMAND') === 'true';
+  }
+
   @Get('questions/:id/explanation')
-  // 해설이 없으면 LLM을 호출하는 공개 엔드포인트 → 전역보다 낮게 제한
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
-    summary: '특정 문제 해설 조회 및 생성',
+    summary: '특정 문제 해설 조회',
     description:
-      'DB에 해설이 없으면 AI 모델을 통해 실시간으로 생성하여 반환합니다. 생성 시 concept_tags도 함께 추출됩니다.',
+      '저장된 해설을 반환합니다. 해설이 없으면 503을 반환합니다(실시간 생성은 기본적으로 꺼져 있음, EXPLANATION_ON_DEMAND=true일 때만 생성).',
   })
   @ApiParam({ name: 'id', description: '문제 ID', type: Number })
   @ApiResponse({ status: 200, description: '해설 조회 성공' })
+  @ApiResponse({ status: 503, description: '아직 해설이 준비되지 않음' })
   async getExplanation(@Param('id', ParseIntPipe) id: number) {
     const question = await this.questionRepository.findOne({ where: { id } });
     if (!question) {
@@ -65,6 +81,12 @@ export class TutorController {
       };
     }
 
+    if (!this.onDemandGenerationEnabled) {
+      throw new ServiceUnavailableException(
+        '이 문제의 해설은 준비 중입니다. 잠시 후 다시 확인해 주세요.',
+      );
+    }
+
     const result = await this.tutorService.generateExplanation(question);
     return {
       success: true,
@@ -72,6 +94,46 @@ export class TutorController {
       conceptTags: result.conceptTags,
       generated: true,
     };
+  }
+
+  @Get('explanations/backfill')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: '해설 일괄 생성 상태',
+    description:
+      '해설 없는 문제 수와 진행 중인 일괄 생성 작업 상태. 관리자 전용.',
+  })
+  async getBackfillStatus() {
+    return {
+      success: true,
+      missing: await this.explanationBackfill.countMissing(),
+      job: this.explanationBackfill.getStatus(),
+    };
+  }
+
+  @Post('explanations/backfill')
+  @HttpCode(202)
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: '해설 일괄 생성 시작',
+    description:
+      '해설 없는 문제를 기본 LLM으로 백그라운드 생성합니다. 바로 202를 반환하고, 진행 상황은 GET explanations/backfill로 확인합니다. 관리자 전용.',
+  })
+  @ApiResponse({ status: 409, description: '이미 진행 중' })
+  async startBackfill(@Body() dto: BackfillExplanationsDto) {
+    const job = await this.explanationBackfill.start(dto);
+    return { success: true, job };
+  }
+
+  @Post('explanations/backfill/stop')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: '해설 일괄 생성 중지 요청. 관리자 전용.' })
+  stopBackfill() {
+    return { success: true, job: this.explanationBackfill.stop() };
   }
 
   @Post('questions/:id/explanation/regenerate')
