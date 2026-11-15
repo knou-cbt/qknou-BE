@@ -23,7 +23,6 @@ export class AuthService {
   async validateOAuthUser(oauthUser: {
     provider: string; //google or kakako
     providerId: string; //OAuth에서 받은 사용자 ID
-    email: string;
     name: string;
   }): Promise<User> {
     //1. 이미 가입된 사용자인지 확인
@@ -33,16 +32,15 @@ export class AuthService {
     );
     if (!user) {
       //2-1. 처음 로그인하는 사용자 -> 회원가입
-      console.log(`[Auth] 새 사용자 생성: ${oauthUser.email}`);
+      console.log(`[Auth] 새 사용자 생성: ${oauthUser.provider}`);
       user = await this.usersService.create({
         provider: oauthUser.provider,
         providerId: oauthUser.providerId,
-        email: oauthUser.email,
         name: oauthUser.name,
       });
     } else {
       //2-2 기존 사용자 -> 정보 업데이트(프로필 이미지, 이름 변경 반영)
-      console.log(`[Auth] 기존 사용자 로그인: ${user.email}`);
+      console.log(`[Auth] 기존 사용자 로그인: ${user.id}`);
       user = await this.usersService.update(user.id, {
         name: oauthUser.name,
       });
@@ -59,7 +57,6 @@ export class AuthService {
     //JWT의 payload (토큰 안에 들어갈 데이터)
     const payload = {
       sub: user.id, //sub는 JWT표준 필드(subject = 사용자 id)
-      email: user.email,
       name: user.name, // 사용자 이름(닉네임)
     };
     //JWT 토큰 생성(환경변수의 JWT_SECRET으로 서명됨)
@@ -70,7 +67,6 @@ export class AuthService {
       //프론트엔드에서 바로 사용할 수 있는 사용자 정보도 함께 반환
       user: {
         id: user.id,
-        email: user.email,
         name: user.name,
         profileImage: user.profileImage,
       },

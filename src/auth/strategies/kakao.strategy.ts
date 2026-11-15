@@ -38,7 +38,6 @@ export class KakaoStrategy extends PassportStrategy(Strategy, 'kakao') {
     const oauthUser = {
       provider: 'kakao',
       providerId: id.toString(),
-      email: _json?.kakao_account?.email || null,
       name: nickname,
       profileImage:
         _json?.kakao_account?.profile?.profile_image_url ||

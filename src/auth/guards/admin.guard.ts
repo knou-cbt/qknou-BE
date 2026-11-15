@@ -4,23 +4,16 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AdminGuard implements CanActivate {
-  constructor(private configService: ConfigService) {}
-
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
-    const adminEmail = this.configService.get<string>('ADMIN_EMAIL');
 
-    // 관리자 전용 로그인(아이디/비밀번호)으로 발급된 토큰
-    const isRoleAdmin = user?.role === 'admin';
-    // 기존 방식: 구글/카카오 로그인 이메일이 ADMIN_EMAIL과 일치
-    const isEmailAdmin = Boolean(adminEmail) && user?.email === adminEmail;
-
-    if (!isRoleAdmin && !isEmailAdmin) {
+    // 관리자 전용 로그인(아이디/비밀번호)으로 발급된 토큰만 관리자로 인정.
+    // (이메일을 수집하지 않으므로 예전 ADMIN_EMAIL 방식은 제거)
+    if (user?.role !== 'admin') {
       throw new ForbiddenException('관리자 권한이 필요합니다.');
     }
     return true;

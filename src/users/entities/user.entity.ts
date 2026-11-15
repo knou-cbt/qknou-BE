@@ -8,7 +8,7 @@ import {
 
 /**
  * provider, providerId를 저장해야 나중에 '이 사용자가 어떤걸로 로그인했는지' 알 수 있다.
- * email이 nullable인 이유: 카카오는 이메일 제공을 거부할 수 있기 때문
+ * 이메일은 수집·저장하지 않는다 (20261115 마이그레이션으로 컬럼 삭제)
  */
 
 //테이블 구조 정의
@@ -17,10 +17,6 @@ export class User {
   //UUID를 기본키로 사용
   @PrimaryGeneratedColumn('uuid')
   id: string;
-
-  //중복 x , OAuth 로그인은 이메일이 없을 수도 있어서 nullable:true
-  @Column({ unique: true, nullable: true })
-  email: string;
 
   //사용자 이름(구글/카카오에서 가져옴)
   @Column({ nullable: true })

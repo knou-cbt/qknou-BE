@@ -28,15 +28,6 @@ export class UsersService {
     });
   }
 
-  //이메일로 사용자 찾기 (나중에 계정 연동 기능에서 사용)
-  async findByEmail(email: string): Promise<User | null> {
-    return this.usersRepository.findOne({
-      where: {
-        email,
-      },
-    });
-  }
-
   //ID로 사용자 찾기 (로그인 후 JWT에서 사용자 정보 가져올 때 사용)
   async findById(id: string): Promise<User | null> {
     return this.usersRepository.findOne({
