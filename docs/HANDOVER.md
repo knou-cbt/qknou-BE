@@ -169,6 +169,18 @@ yarn lint && yarn test && yarn build
 - Google 클라이언트 보안 비밀번호는 콘솔에서 다시 볼 수 없음 → 분실 시 콘솔의 "Add secret"으로 새로 발급해 위 절차로 교체.
 - 운영 전달문의 남은 요청: Kakao Redirect URI(`https://www.qknou.kr/api-proxy/auth/kakao/callback`) 등록, OpenAI 키 교체(401), 피드백용 GitHub 토큰을 조직·봇 계정 토큰으로 교체.
 
+## 6-1. 11/15 해설 정책 변경
+
+- 사용자 요청 시 해설 실시간 생성은 꺼져 있음(해설 없는 문제는 503). 다시 켜려면 env `EXPLANATION_ON_DEMAND=true`.
+- 11/15 기준 문제 107,690개 중 85,449개(79%)가 해설 없음. 시험지를 더 추가하지 않으므로 아래 방식으로 한 번에 채운다.
+- **일괄 입력 도구** `tools/explanation-batch.mjs` (운영 DB 권한 불필요). 산출물은 저장소 밖 `~/qknou-release/explanations/`.
+  1. `extract`: 공개 API(study 모드)로 해설 없는 문제 수집
+  2. `build --days 7`: 같은 문제를 묶어 한 번만 생성, `pilot.jsonl`(20개)과 `day-1..7.jsonl` 생성. 프롬프트는 서버와 동일하고 공통 지문(sharedExample)만 추가
+  3. `OPENAI_API_KEY=... submit <name>` → `status` → `download <name>`: OpenAI Batch API(24시간 안에 완료)
+  4. `to-sql <name> --release YYYYMMDD-n`: `~/qknou-release/<릴리스>/`에 SQL·SHA256SUMS·RELEASE.md 생성. 해설이 빈 문제만 채우고 기존 해설은 덮어쓰지 않음. 실패분은 `retry <name>`으로 다시 배치 파일 생성
+  5. SQL 릴리스로 업로드 → 자동 반영(DB 백업 후 적용)
+- 몇 개씩 빠진 문제는 관리자 API `POST /api/tutor/explanations/backfill`로도 채울 수 있음(서버가 기본 LLM으로 생성).
+
 ## 7. 남은 이슈 / 후속 작업
 
 ### 보안
