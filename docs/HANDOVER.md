@@ -10,7 +10,7 @@
 | 런타임 | Node 20 (CI·Dockerfile 기준). 로컬 Node 22에서도 빌드·테스트 통과 |
 | 패키지 매니저 | **Yarn 1 (classic)** — `yarn.lock` v1 |
 | 인증 | 구글/카카오 OAuth → 자체 JWT 발급(기본 7일). 관리자는 아이디/비밀번호 로그인(`role: admin` 토큰)만. 사용자 이메일은 수집하지 않음(11/15) |
-| LLM | `openai` SDK로 OpenAI 호환 API 호출. 기본 LLM은 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`(없으면 기존 `VLLM_*`/`OPENAI_*`). 모든 호출은 `src/llm/llm.service.ts` 경유. 사용자 개인 LLM은 `src/llm-settings/` |
+| LLM | `openai` SDK로 OpenAI 호환 API 호출. 기본 LLM은 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`(없으면 기존 `VLLM_*`/`OPENAI_*`). 모든 호출은 `src/llm/llm.service.ts` 경유. 사용자 AI 연결(BYOK)은 `src/ai-connections/` (10/31, `src/llm-settings/` 대체) |
 | 파일 저장소 | Cloudflare R2 (`R2_*` 환경변수, `src/storage`) |
 | 모니터링 | Sentry(`SENTRY_DSN`), New Relic(`NEW_RELIC_LICENSE_KEY`) — 둘 다 값이 있을 때만 활성화 |
 | 기타 연동 | 피드백 → GitHub 저장소 md 파일(`GITHUB_*`), Discord Webhook(`DISCORD_WEBHOOK_URL`) |
@@ -160,6 +160,30 @@ yarn lint && yarn test && yarn build
 5. `.github/workflows/deploy.yml`은 PM2 기준(`~/qknou-BE`, `deploy.sh`, `pm2 save`)이라 Docker 운영과 맞지 않음. `main` push 때 실행되므로 서버에 옛 PM2 프로세스가 남아 있지 않은지 확인 후 Docker 배포 방식으로 교체 필요.
 6. 프론트 `/api/tutor/*` 라우트가 백엔드 호출 시 `X-Forwarded-For`를 전달하지 않음 → 지금은 내부 요청으로 간주돼 IP당 분당 제한이 빠짐(일일 5회 제한은 사용자 기준이라 그대로). 프론트에서 헤더를 넘기면 IP당 제한이 다시 적용됨.
 
+## 5-1. 10/31 적용 사항 (브랜치 `feature/ai-connections`, 11/25 main 머지)
+
+FE 마이페이지 **AI 연결** 탭(`/mypage?tab=ai`) 명세에 맞춰 10/29 개인 LLM(`/api/users/me/llm-setting`)을 **사용자 AI 연결(BYOK)** 로 교체했다. FE가 새 API만 호출하므로 옛 API·코드는 삭제.
+
+| 항목 | 내용 |
+| --- | --- |
+| API | `GET/PATCH /api/users/me/ai-connections`, `PUT/DELETE /api/users/me/ai-connections/:provider` (docs/API.md #38~41) |
+| 제공사 | `openrouter`·`gemini`·`openai`·`anthropic` 고정 주소만. 사용자 입력 주소(custom)·모델 선택 없음 → SSRF 표면 제거 |
+| 모델 | 제공사별 `AI_DEFAULT_MODEL_*` 환경변수 |
+| 키 확인 | 저장 전에 제공사 목록 조회 API로 확인(요금 없음, 5초). 무효 400 / 장애 502 |
+| 키 보관 | `user_ai_connections`, AES-256-GCM, 저장마다 새 iv, AAD=`user_id:provider`(다른 행으로 옮기면 복호화 실패). 응답엔 `maskedKey`만. 해제는 물리 삭제, 탈퇴 시 CASCADE |
+| 선택 | `users.active_ai_provider` (NULL=큐노 기본 AI). 처음 연결한 키는 자동 선택, 해제 시 같은 트랜잭션에서 NULL |
+| 튜터 | 사용자 키 사용 중엔 일일 횟수 미차감. 실패 시 기본 AI로 대체하지 않고 `409 AI_KEY_INVALID` / `429 AI_QUOTA_EXCEEDED` / `402 AI_BILLING_REQUIRED` / `502 AI_PROVIDER_ERROR`. 응답에 `aiProvider` 추가 |
+| Anthropic | `@anthropic-ai/sdk` 추가. 튜터의 Chat Completions 형식 요청을 Messages API로 변환(`src/llm/anthropic-chat.ts`) |
+| 요청 제한 | PUT 사용자당 분당 5회(`UserThrottlerGuard`) |
+| 로그 | Sentry `beforeSend`에서 `apiKey`, `Authorization`·`x-api-key`·`x-goog-api-key` 가림. New Relic은 기존 설정이 `authorization`·`x*` 헤더 제외 |
+| 검증 | 테스트 134개 통과. 로컬 DB에 마이그레이션 적용 후(`DB_SYNCHRONIZE=false`) 실서버 호출 확인: 가짜 키 4개 제공사 모두 400, 6번째 PUT 429, 지원 안 하는 provider 400, upsert 시 connectedAt 유지, AAD 위반 409, 가짜 Gemini 키로 튜터 호출 시 409 + 횟수 미차감, 사용자 삭제 시 CASCADE |
+
+### 배포 전 필수 작업 (10/31)
+1. 운영 DB에 `migrations/20261031_add_user_ai_connections.sql` 실행. (10/29 `20261029_add_user_llm_settings.sql`은 더 이상 필요 없음. 이미 실행했다면 파일 끝 주석대로 행 0개 확인 후 DROP)
+2. `.env.production`에 `AI_KEY_ENCRYPTION_KEY`(`openssl rand -base64 32`) 추가 — 10/29에 `LLM_KEY_ENCRYPTION_KEY`를 이미 넣었다면 그 값을 그대로 읽으므로 생략 가능. 백업 필수.
+3. `.env.production`에 `AI_DEFAULT_MODEL_OPENAI/ANTHROPIC/GEMINI/OPENROUTER` 추가(`.env.example` 예시값을 각 제공사 문서로 확인). 빠진 제공사는 키 연결은 되지만 튜터 답변이 502.
+4. 롤백: 이전 이미지로 되돌리면 새 테이블·컬럼은 무시됨(삭제 불필요).
+
 ## 6. 11/01 운영 반영
 
 | 릴리스 | 내용 |
@@ -168,6 +192,18 @@ yarn lint && yarn test && yarn build
 
 - Google 클라이언트 보안 비밀번호는 콘솔에서 다시 볼 수 없음 → 분실 시 콘솔의 "Add secret"으로 새로 발급해 위 절차로 교체.
 - 운영 전달문의 남은 요청: Kakao Redirect URI(`https://www.qknou.kr/api-proxy/auth/kakao/callback`) 등록, OpenAI 키 교체(401), 피드백용 GitHub 토큰을 조직·봇 계정 토큰으로 교체.
+
+## 6-1. 11/15 해설 정책 변경
+
+- 사용자 요청 시 해설 실시간 생성은 꺼져 있음(해설 없는 문제는 503). 다시 켜려면 env `EXPLANATION_ON_DEMAND=true`.
+- 11/15 기준 문제 107,690개 중 85,449개(79%)가 해설 없음. 시험지를 더 추가하지 않으므로 아래 방식으로 한 번에 채운다.
+- **일괄 입력 도구** `tools/explanation-batch.mjs` (운영 DB 권한 불필요). 산출물은 저장소 밖 `~/qknou-release/explanations/`.
+  1. `extract`: 공개 API(study 모드)로 해설 없는 문제 수집
+  2. `build --days 7`: 같은 문제를 묶어 한 번만 생성, `pilot.jsonl`(20개)과 `day-1..7.jsonl` 생성. 프롬프트는 서버와 동일하고 공통 지문(sharedExample)만 추가
+  3. `OPENAI_API_KEY=... submit <name>` → `status` → `download <name>`: OpenAI Batch API(24시간 안에 완료)
+  4. `to-sql <name> --release YYYYMMDD-n`: `~/qknou-release/<릴리스>/`에 SQL·SHA256SUMS·RELEASE.md 생성. 해설이 빈 문제만 채우고 기존 해설은 덮어쓰지 않음. 실패분은 `retry <name>`으로 다시 배치 파일 생성
+  5. SQL 릴리스로 업로드 → 자동 반영(DB 백업 후 적용)
+- 몇 개씩 빠진 문제는 관리자 API `POST /api/tutor/explanations/backfill`로도 채울 수 있음(서버가 기본 LLM으로 생성).
 
 ## 7. 남은 이슈 / 후속 작업
 
@@ -182,7 +218,6 @@ yarn lint && yarn test && yarn build
 
 ### 버그 / 품질
 - [x] ~~`ChatLimitGuard` UTC 날짜·동시 요청·실패 시 차감 문제~~ → 10/29 수정.
-- [ ] 개인 LLM custom 주소는 DNS 검사와 실제 연결 사이에 DNS가 바뀌는 공격(DNS 리바인딩)까지 완전히 막지는 못함. 필요하면 서버에서 외부로 나가는 트래픽을 방화벽으로 제한.
 - [ ] 요청 제한 카운터가 메모리 저장이라 인스턴스가 늘면 인스턴스별로 따로 셈(현재 단일 인스턴스면 문제없음). 확장 시 Redis 저장소로 교체.
 - [ ] `README.md`가 Nest 기본 템플릿 위주 — 2절 내용으로 교체.
 
@@ -195,5 +230,6 @@ yarn lint && yarn test && yarn build
 ### LLM
 - [ ] 신규 LLM 정보 (보류). 받으면 환경변수 3개만 바꾸면 됨 — OpenAI 호환 API가 아니면 별도 작업 필요.
 - [x] 개인 LLM 등록 CRUD + API Key 암호화 저장 → 10/29.
-- [ ] 프론트: 개인 LLM 설정 화면, 챗봇 응답의 `usingPersonalLlm` 표시, 502/503/429 처리.
-- [ ] 실제 키로 개인 LLM 등록 성공 경로 확인 (로컬은 가짜 키로 실패 경로까지만 검증함).
+- [ ] 프론트(후속): 챗봇에서 `AI_KEY_INVALID` 등 code 처리, 사용자 키 사용 중엔 `/api/chatbot`(운영자 키) 대체 호출 막기.
+- [ ] 실제 키로 4개 제공사 연결·튜터 답변 성공 경로 확인 (로컬은 가짜 키로 실패 경로까지만 검증함). 특히 OpenRouter 무료 모델은 `response_format`(JSON) 미지원일 수 있음 → intent 분류가 `general`로 떨어지는지 확인.
+- [ ] `src/llm/safe-url.ts`의 `assertSafeLlmBaseUrl`은 custom 주소가 없어져 미사용(`isPrivateAddress`만 요청 제한에서 사용). 정리 여부 결정.

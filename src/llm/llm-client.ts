@@ -1,28 +1,39 @@
 import { ConfigService } from '@nestjs/config';
+import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 
 /**
  * - openai: OpenAI 공식 API
  * - vllm: 자체 호스팅 vLLM. reasoning 모델의 thinking을 끄는 전용 옵션을 같이 보냄
- * - openai-compatible: 그 외 OpenAI 호환 API (Gemini 등). 전용 옵션 없이 표준 필드만 보냄
+ * - openai-compatible: 그 외 OpenAI 호환 API (Gemini, OpenRouter 등). 전용 옵션 없이 표준 필드만 보냄
+ * - anthropic: Anthropic Messages API (Anthropic SDK). 사용자 키 연결에서만 사용
  */
-export type LlmProvider = 'openai' | 'vllm' | 'openai-compatible';
+export type LlmProvider = 'openai' | 'vllm' | 'openai-compatible' | 'anthropic';
 
 export interface LlmConnection {
   provider: LlmProvider;
   baseURL?: string;
   apiKey: string;
   model: string;
+  defaultHeaders?: Record<string, string>;
+  /** 사용자 키 호출에서 "키가 무효"로 볼 응답 코드. 기본 401·403 */
+  invalidKeyStatuses?: number[];
 }
 
-/** 실제 호출에 쓰는 클라이언트 + 모델. 기본 LLM과 사용자 개인 LLM 모두 이 형태 */
-export interface LlmTarget {
-  client: OpenAI;
+interface LlmTargetBase {
   model: string;
-  provider: LlmProvider;
-  /** 사용자가 등록한 개인 LLM 여부 (공용 캐시 저장 여부 등 판단에 사용) */
+  /** 사용자가 등록한 개인 키로 호출하는지 (공용 캐시 저장 여부 등 판단에 사용) */
   isPersonal: boolean;
+  invalidKeyStatuses?: number[];
 }
+
+/** 실제 호출에 쓰는 클라이언트 + 모델. 기본 LLM과 사용자 개인 키 모두 이 형태 */
+export type LlmTarget =
+  | (LlmTargetBase & {
+      provider: Exclude<LlmProvider, 'anthropic'>;
+      client: OpenAI;
+    })
+  | (LlmTargetBase & { provider: 'anthropic'; client: Anthropic });
 
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 // LLM 호출 1건 타임아웃/재시도. SDK 기본값(10분, 2회 재시도)이면 응답 없는 LLM
@@ -38,13 +49,14 @@ const DEFAULT_LLM_MAX_RETRIES = 1;
  */
 export function resolveDefaultLlmConnection(
   configService: ConfigService,
-): LlmConnection {
+): LlmConnection & { provider: Exclude<LlmProvider, 'anthropic'> } {
   const get = (key: string) => configService.get<string>(key) || undefined;
   const legacyVllmUrl = get('VLLM_URL');
   const baseURL = get('LLM_BASE_URL') ?? legacyVllmUrl;
 
-  const provider: LlmProvider =
-    (get('LLM_PROVIDER') as LlmProvider | undefined) ??
+  // 기본 LLM은 OpenAI 호환 API만 지원 (anthropic은 사용자 키 연결 전용)
+  const provider: Exclude<LlmProvider, 'anthropic'> =
+    (get('LLM_PROVIDER') as Exclude<LlmProvider, 'anthropic'> | undefined) ??
     (legacyVllmUrl && !get('LLM_BASE_URL')
       ? 'vllm'
       : baseURL
@@ -66,6 +78,10 @@ export function resolveDefaultLlmConnection(
   return { provider, baseURL, apiKey, model };
 }
 
+export function llmTimeoutMs(configService: ConfigService): number {
+  return Number(configService.get('LLM_TIMEOUT_MS') ?? DEFAULT_LLM_TIMEOUT_MS);
+}
+
 export function createLlmClient(
   connection: LlmConnection,
   configService: ConfigService,
@@ -77,9 +93,10 @@ export function createLlmClient(
   return new OpenAI({
     apiKey: connection.apiKey,
     ...(connection.baseURL ? { baseURL: connection.baseURL } : {}),
-    timeout: Number(
-      configService.get('LLM_TIMEOUT_MS') ?? DEFAULT_LLM_TIMEOUT_MS,
-    ),
+    ...(connection.defaultHeaders
+      ? { defaultHeaders: connection.defaultHeaders }
+      : {}),
+    timeout: llmTimeoutMs(configService),
     maxRetries:
       options.maxRetries ??
       Number(configService.get('LLM_MAX_RETRIES') ?? DEFAULT_LLM_MAX_RETRIES),

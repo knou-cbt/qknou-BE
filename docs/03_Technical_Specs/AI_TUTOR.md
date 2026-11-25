@@ -222,15 +222,15 @@ LLM을 통해 사용자 질문의 의도와 핵심 개념을 추출한다.
 ```
 요청 → JwtAuthGuard (로그인 검증) 
   → ChatLimitGuard (횟수 제한 검증)
-  → (개인 LLM 사용 중이면) LlmSettingsService.resolveTarget()
+  → (연결한 AI 사용 중이면) AiConnectionsService.resolveTarget() — 키 복호화는 여기서만
   → TutorService.chat() 실행 — 실패 시 횟수 환불
-  → 응답 { data, remainingCount, usingPersonalLlm }
+  → 응답 { data, remainingCount, usingPersonalLlm, aiProvider }
 ```
 
 **ChatLimitGuard 로직:**
 ```
 1. JWT에서 user_id 추출
-2. 사용 중인 개인 LLM이 있으면 → 차감 없이 통과
+2. 사용 중인 연결 AI(users.active_ai_provider)가 있으면 → 차감 없이 통과
 3. 오늘 날짜(한국시간 YYYY-MM-DD)로 `UPDATE ... SET count = count + 1 WHERE count < 5 RETURNING count`
    → 행이 바뀌면 통과 (조회와 증가를 한 쿼리로 해서 동시 요청이 5회를 넘지 못함)
 4. 안 바뀌었는데 오늘 행이 있음 → 403 Forbidden
@@ -359,5 +359,7 @@ WHERE date < CURRENT_DATE - INTERVAL '90 days';
 - 모든 LLM 호출은 `src/llm/llm.service.ts`의 `LlmService.complete(target, params)`를 거친다. 타임아웃(30초)·재시도·동시 호출 제한(5건 + 대기열 20건, 초과 시 503)이 여기서 공통 적용된다.
 - 기본 LLM은 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`(+`LLM_PROVIDER`)로 설정한다. 없으면 기존 `VLLM_*` → `OPENAI_*` 순으로 판단해서 기존 운영 설정이 그대로 동작한다 (`src/llm/llm-client.ts`).
 - vLLM 전용 옵션(`chat_template_kwargs.enable_thinking=false`)은 provider가 `vllm`일 때만 보낸다.
-- 해설 생성은 항상 기본 LLM. 챗봇은 사용자가 개인 LLM을 등록·사용 중이면 그 LLM을 쓰고, 이때 생성된 개념 설명은 공용 `terms` 캐시에 저장하지 않는다.
-- 개인 LLM: `src/llm-settings/` (API는 docs/API.md #38~41). 키는 AES-256-GCM(`LLM_KEY_ENCRYPTION_KEY`)으로 암호화 저장, custom 주소는 https + 공인 IP만 허용(SSRF 방지), 리다이렉트 미추종, 재시도 없음.
+- 해설 생성은 항상 기본 LLM. 챗봇은 사용자가 AI를 연결·선택했으면 그 AI를 쓰고, 이때 생성된 개념 설명은 공용 `terms` 캐시에 저장하지 않는다.
+- 사용자 AI 연결(BYOK, 2026-10-31): `src/ai-connections/` (API는 docs/API.md #38~41). 제공사는 openrouter/gemini/openai/anthropic 고정 주소만(사용자 입력 주소 없음). 키는 AES-256-GCM(`AI_KEY_ENCRYPTION_KEY`, AAD=`user_id:provider`)으로 `user_ai_connections`에 저장, 모델은 `AI_DEFAULT_MODEL_*` 환경변수, 재시도 없음.
+- openai/gemini/openrouter는 OpenAI 호환 API, anthropic은 Anthropic SDK로 호출한다(`src/llm/anthropic-chat.ts`가 Chat Completions 형식 ↔ Messages API 변환, temperature는 보내지 않음).
+- 사용자 키 호출이 실패하면 기본 LLM으로 대체하지 않고 `src/llm/user-key-error.ts`의 code(AI_KEY_INVALID/AI_QUOTA_EXCEEDED/AI_BILLING_REQUIRED/AI_PROVIDER_ERROR)로 응답한다.

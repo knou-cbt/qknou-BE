@@ -390,16 +390,21 @@ term_candidates 규칙:
 
   private async answerGeneral(
     target: LlmTarget,
-    question: Questsion,
+    question: Questsion | null,
     userMessage: string,
     history: ChatMessage[],
   ): Promise<string> {
-    const systemPrompt = `당신은 한국방송통신대학교(KNOU) 학생들의 학습을 돕는 '방송대 튜터'입니다.
-학생이 시험 문제를 풀고 있는 화면에서 질문하고 있습니다.
+    const context = question
+      ? `학생이 시험 문제를 풀고 있는 화면에서 질문하고 있습니다.
 학습에 도움이 되는 답변을 해주세요.
 
 [현재 문제 컨텍스트]
-문제: ${question.question_text}
+문제: ${question.question_text}`
+      : `학생이 특정 문제 없이 학습 관련 질문을 하고 있습니다.
+학습에 도움이 되는 답변을 해주세요.`;
+
+    const systemPrompt = `당신은 한국방송통신대학교(KNOU) 학생들의 학습을 돕는 '방송대 튜터'입니다.
+${context}
 
 가이드라인:
 1. 100~200자 분량
@@ -438,10 +443,11 @@ term_candidates 규칙:
   // ──────────────────────────────────────────────
 
   /**
+   * @param questionId 현재 문제 ID. 없으면 문제와 무관한 일반 대화
    * @param target 사용자 개인 LLM. 없으면 기본 LLM
    */
   async chat(
-    questionId: number,
+    questionId: number | null | undefined,
     userMessage: string,
     history: ChatMessage[] = [],
     target: LlmTarget = this.llmService.defaultTarget,
@@ -456,16 +462,21 @@ term_candidates 규칙:
       year: number;
     }>;
   }> {
-    const question = await this.questionRepository.findOne({
-      where: { id: questionId },
-      relations: ['exam'],
-    });
-
-    if (!question) {
-      throw new NotFoundException(`문제 ID ${questionId}를 찾을 수 없습니다.`);
+    let question: Questsion | null = null;
+    if (questionId != null) {
+      question = await this.questionRepository.findOne({
+        where: { id: questionId },
+        relations: ['exam'],
+      });
+      if (!question) {
+        throw new NotFoundException(
+          `문제 ID ${questionId}를 찾을 수 없습니다.`,
+        );
+      }
     }
 
-    const subjectId = question.exam.subject_id;
+    // 개념 캐시와 관련 문제 추천은 과목 단위라 문제가 없으면 건너뜀
+    const subjectId = question?.exam.subject_id;
 
     // 1. intent 분류
     const { intent, term_candidates } = await this.classifyIntent(
@@ -498,7 +509,9 @@ term_candidates 규칙:
         } else {
           const explanations = await Promise.all(
             term_candidates.map((t) =>
-              this.getTermExplanation(target, t, subjectId),
+              subjectId === undefined
+                ? this.generateTermExplanation(target, t)
+                : this.getTermExplanation(target, t, subjectId),
             ),
           );
           answer = explanations.join('\n\n---\n\n');
@@ -521,6 +534,11 @@ term_candidates 규칙:
       }
 
       case 'recommend': {
+        if (subjectId === undefined) {
+          answer =
+            '관련 문제 추천은 문제 화면에서 질문하면 해당 과목 기준으로 찾아드립니다.';
+          break;
+        }
         const recs = await this.recommendQuestions(
           term_candidates,
           subjectId,
