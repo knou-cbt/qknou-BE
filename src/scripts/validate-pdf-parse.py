@@ -25,19 +25,28 @@ def ensure_api_keys_from_dotenv():
     if all(os.getenv(k) for k in required_keys):
         return
     env_path = Path(".env")
-    if not env_path.exists():
-        return
-    try:
-        for raw in env_path.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            key = k.strip()
-            if key in required_keys and not os.getenv(key):
-                os.environ[key] = v.strip().strip("\"' ")
-    except Exception:
-        return
+    if env_path.exists():
+        try:
+            for raw in env_path.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                key = k.strip()
+                if key in required_keys and not os.getenv(key):
+                    os.environ[key] = v.strip().strip("\"' ")
+        except Exception:
+            pass
+    if not os.getenv("DATALAB_API_KEY"):
+        # `datalab login`(datalab-python-sdk)이 저장한 키 사용
+        base = os.getenv("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+        cfg = Path(base) / "datalab" / "config.json"
+        try:
+            saved = json.loads(cfg.read_text(encoding="utf-8")).get("api_key")
+            if saved:
+                os.environ["DATALAB_API_KEY"] = saved
+        except Exception:
+            pass
 
 
 OCR_CORRECTIONS: dict[str, str] = {
@@ -1607,7 +1616,13 @@ def split_question_blocks(text: str):
 
     shared_note: 블록 말미의 ※ 공통 설명 — 다음 문항들의 sharedExample로 사용.
     """
-    matches = list(QUESTION_SPLIT_PATTERN.finditer(text or ""))
+    text = text or ""
+    # ``` 코드 블록 안의 줄 번호("1. #define ...")는 문항 시작이 아님
+    fence_spans = [(f.start(), f.end()) for f in _CODE_FENCE_RE.finditer(text)]
+    matches = [
+        m for m in QUESTION_SPLIT_PATTERN.finditer(text)
+        if not any(s <= m.start() < e for s, e in fence_spans)
+    ]
     blocks = []
     for i, m in enumerate(matches):
         qn = int(m.group(1))
@@ -1892,7 +1907,18 @@ def analyze_pdf(
     extracted_images = []
 
     for i, page in enumerate(reader.pages, start=1):
-        page_text = page.extract_text() or ""
+        try:
+            page_text = page.extract_text() or ""
+        except Exception as e:
+            # pypdf 6+는 내용 스트림이 큰 스캔 PDF에서 LimitReachedError를 냄 → PyMuPDF로 대체
+            page_text = ""
+            if fitz is not None:
+                try:
+                    with fitz.open(str(pdf_path)) as _doc:
+                        page_text = _doc[i - 1].get_text() or ""
+                except Exception:
+                    pass
+            print(f"  [WARN] page {i} pypdf 텍스트 추출 실패({type(e).__name__}) → pymupdf 대체")
         text_layer_all.append(page_text)
 
         page_images = []
