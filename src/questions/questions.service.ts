@@ -32,7 +32,8 @@ export class QuestionsService {
 
   /**
    * 문항 단건 공개 조회 (암기모드 화면 진입 / 공유 링크 진입점)
-   * 로그인 없이도 조회 가능. userId가 있으면 isBookmarked를 채운다.
+   * 로그인 없이도 조회 가능하지만, 정답·해설은 로그인 사용자에게만 준다.
+   * userId가 있으면 isBookmarked를 채운다.
    */
   async findOnePublic(id: number, userId?: string) {
     const question = await this.questionRepository.findOne({
@@ -59,8 +60,9 @@ export class QuestionsService {
         : question.shared_example,
       imageUrls: question.question_image_urls,
       choices: question.choices,
-      correctAnswers: question.correct_answers,
-      explanation: question.explanation,
+      // 정답·해설은 로그인 사용자에게만 (비로그인은 null)
+      correctAnswers: userId ? question.correct_answers : null,
+      explanation: userId ? question.explanation : null,
       exam: {
         id: question.exam.id,
         title: question.exam.title,

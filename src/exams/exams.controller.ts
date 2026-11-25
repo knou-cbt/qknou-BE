@@ -21,7 +21,10 @@ import { GetQuestionsQueryDto } from './dto/get-questions-query.dto';
 import { FindQuestionsResponseDto } from './dto/find-questions-response.dto';
 import { ExamsService } from './exams.service';
 import { SubmitExamDto } from './dto/submit-exam.dto';
+import { Throttle } from '@nestjs/throttler';
 import { OptionalJwtAuthGuard } from 'src/auth/guards/optional-jwt-auth.guard';
+import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { PREVIEW_QUESTION_COUNT } from './exams.service';
 
 @ApiTags('exams')
 @Controller('api/exams')
@@ -30,21 +33,17 @@ export class ExamsController {
 
   /**
    * GET /api/exams/:id/questions
-   * 시험의 문제 조회 (페이지네이션 지원)
+   * 시험의 문제 조회. 정답·해설은 넣지 않는다(정답: GET /api/exams/:id/answers).
    *
-   * @param mode - study: 정답 포함 | test: 정답 미포함 (기본값)
-   * @param page - 페이지 번호 (선택사항, 미제공 시 전체 조회)
-   * @param limit - 페이지당 문제 수 (선택사항)
-   *
-   * @example
-   * GET /api/exams/1/questions (전체 조회)
-   * GET /api/exams/1/questions?page=1&limit=5 (5개씩 페이지네이션)
+   * - 로그인: 전체 문항 (page·limit 페이지네이션 지원)
+   * - 비로그인: 앞 PREVIEW_QUESTION_COUNT 문항만 + preview 정보
+   * - mode 파라미터는 예전 화면 호환용으로 받기만 하고 쓰지 않는다
    */
   @Get(':id/questions')
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({
     summary: '시험 문제 조회',
-    description:
-      '특정 시험의 문제들을 조회합니다. study 모드에서는 정답이 포함되며, 페이지네이션을 지원합니다. 문제/선택지 이미지는 imageUrls 배열로 제공됩니다.',
+    description: `특정 시험의 문제들을 조회합니다. 정답·해설은 포함하지 않습니다. 비로그인은 앞 ${PREVIEW_QUESTION_COUNT}문항만 받습니다. 문제/선택지 이미지는 imageUrls 배열로 제공됩니다.`,
   })
   @ApiParam({ name: 'id', description: '시험 ID', type: Number })
   @ApiOkResponse({
@@ -55,13 +54,35 @@ export class ExamsController {
   async findQuestions(
     @Param('id', ParseIntPipe) id: number,
     @Query() query: GetQuestionsQueryDto,
+    @Req() req: any,
   ) {
     const data = await this.examsService.findQuestions(
       id,
-      query.mode,
+      Boolean(req.user?.id),
       query.page,
       query.limit,
     );
+    return { success: true, data };
+  }
+
+  /**
+   * GET /api/exams/:id/answers
+   * 시험 정답 조회 (로그인 필요). 암기모드에서 문항 목록과 합쳐 쓴다.
+   */
+  @Get(':id/answers')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({
+    summary: '시험 정답 조회 (로그인 필요)',
+    description:
+      '시험의 문항별 정답(correctAnswers)을 돌려줍니다. 해설은 튜터 해설 API로 따로 받습니다.',
+  })
+  @ApiParam({ name: 'id', description: '시험 ID', type: Number })
+  @ApiResponse({ status: 200, description: '조회 성공' })
+  @ApiResponse({ status: 401, description: '로그인 필요' })
+  @ApiResponse({ status: 404, description: '시험을 찾을 수 없습니다' })
+  async findAnswers(@Param('id', ParseIntPipe) id: number) {
+    const data = await this.examsService.findAnswers(id);
     return { success: true, data };
   }
 
@@ -73,7 +94,7 @@ export class ExamsController {
   @ApiOperation({
     summary: '시험 제출',
     description:
-      '시험 답안을 제출하고 채점 결과를 받습니다. 로그인 상태로 호출하면 "최근 풀이 기록"(마이페이지)에 자동 저장됩니다(이전 기록은 대체됨). 비로그인이어도 채점은 동일하게 동작합니다.',
+      '시험 답안을 제출하고 채점 결과를 받습니다. 로그인 상태로 호출하면 "최근 풀이 기록"(마이페이지)에 자동 저장됩니다(이전 기록은 대체됨). 비로그인은 미리보기 문항만 채점합니다.',
   })
   @ApiParam({ name: 'id', description: '시험 ID', type: Number })
   @ApiResponse({ status: 200, description: '채점 완료' })

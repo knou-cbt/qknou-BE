@@ -14,7 +14,7 @@ export class GetQuestionsQueryDto {
   @ApiPropertyOptional({
     enum: QuestionMode,
     default: QuestionMode.TEST,
-    description: '문제 조회 모드 (study: 정답 포함, test: 정답 미포함)',
+    description: '예전 화면 호환용. 무시됨 (정답은 GET /api/exams/:id/answers)',
     example: 'test',
   })
   @IsOptional()
@@ -23,7 +23,7 @@ export class GetQuestionsQueryDto {
 
   @ApiPropertyOptional({
     type: Number,
-    description: '페이지 번호 (미제공 시 전체 조회)',
+    description: '페이지 번호 (미제공 시 전체 조회, 로그인 시에만 적용)',
     example: 1,
     minimum: 1,
   })

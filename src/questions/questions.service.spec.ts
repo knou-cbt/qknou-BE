@@ -54,6 +54,9 @@ describe('QuestionsService', () => {
       const result = await service.findOnePublic(1);
 
       expect(result.isBookmarked).toBeNull();
+      // 비로그인은 정답·해설을 받지 못한다
+      expect(result.correctAnswers).toBeNull();
+      expect(result.explanation).toBeNull();
       expect(bookmarksService.isBookmarked).not.toHaveBeenCalled();
     });
 
@@ -80,6 +83,7 @@ describe('QuestionsService', () => {
       const result = await service.findOnePublic(1, 'user-1');
 
       expect(result.isBookmarked).toBe(true);
+      expect(result.correctAnswers).toEqual([1]);
       expect(bookmarksService.isBookmarked).toHaveBeenCalledWith('user-1', 1);
       expect(result.exam).toEqual({
         id: 10,
