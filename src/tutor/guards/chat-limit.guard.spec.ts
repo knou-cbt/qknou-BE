@@ -1,6 +1,6 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { ChatLimitGuard } from './chat-limit.guard';
-import { LlmSettingsService } from 'src/llm-settings/llm-settings.service';
+import { AiConnectionsService } from 'src/ai-connections/ai-connections.service';
 
 function context(request: any): ExecutionContext {
   return {
@@ -11,7 +11,7 @@ function context(request: any): ExecutionContext {
 describe('ChatLimitGuard', () => {
   let updateResult: { count: number }[];
   let repository: any;
-  let llmSettings: { hasEnabled: jest.Mock };
+  let aiConnections: { getActiveProvider: jest.Mock };
   let guard: ChatLimitGuard;
 
   beforeEach(() => {
@@ -29,10 +29,10 @@ describe('ChatLimitGuard', () => {
       insert: jest.fn().mockResolvedValue(undefined),
       findOne: jest.fn().mockResolvedValue({ count: 2 }),
     };
-    llmSettings = { hasEnabled: jest.fn().mockResolvedValue(false) };
+    aiConnections = { getActiveProvider: jest.fn().mockResolvedValue(null) };
     guard = new ChatLimitGuard(
       repository,
-      llmSettings as unknown as LlmSettingsService,
+      aiConnections as unknown as AiConnectionsService,
     );
   });
 
@@ -73,11 +73,12 @@ describe('ChatLimitGuard', () => {
     expect(req.remainingCount).toBe(3);
   });
 
-  it('개인 LLM 사용 중이면 차감하지 않고 통과', async () => {
-    llmSettings.hasEnabled.mockResolvedValue(true);
+  it('사용자 키(연결한 AI) 사용 중이면 차감하지 않고 통과', async () => {
+    aiConnections.getActiveProvider.mockResolvedValue('gemini');
     const req: any = { user: { id: 'u1' } };
     await guard.canActivate(context(req));
     expect(req.usingPersonalLlm).toBe(true);
+    expect(req.aiProvider).toBe('gemini');
     expect(req.chatCountDate).toBeUndefined();
     expect(req.remainingCount).toBe(3);
     expect(repository.insert).not.toHaveBeenCalled();

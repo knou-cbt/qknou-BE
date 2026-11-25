@@ -8,7 +8,7 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
-import { LlmSettingsService } from 'src/llm-settings/llm-settings.service';
+import { AiConnectionsService } from 'src/ai-connections/ai-connections.service';
 import { DAILY_CHAT_LIMIT, kstToday } from '../chat-limit-date';
 
 @Injectable()
@@ -18,7 +18,7 @@ export class ChatLimitGuard implements CanActivate {
   constructor(
     @InjectRepository(UserChatLimit)
     private chatLimitRepository: Repository<UserChatLimit>,
-    private llmSettingsService: LlmSettingsService,
+    private aiConnectionsService: AiConnectionsService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -32,10 +32,13 @@ export class ChatLimitGuard implements CanActivate {
     const today = kstToday();
 
     try {
-      // 개인 LLM을 쓰는 동안은 비용이 사용자 부담이라 일일 횟수에서 차감하지 않음
+      // 사용자 키로 답하는 동안은 비용이 사용자 부담이라 일일 횟수에서 차감하지 않음
       // (분당 요청 제한은 컨트롤러의 @Throttle로 그대로 적용)
-      if (await this.llmSettingsService.hasEnabled(userId)) {
+      const aiProvider =
+        await this.aiConnectionsService.getActiveProvider(userId);
+      if (aiProvider) {
         request.usingPersonalLlm = true;
+        request.aiProvider = aiProvider;
         request.remainingCount = await this.currentRemaining(userId, today);
         return true;
       }

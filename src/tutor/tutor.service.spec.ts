@@ -128,6 +128,15 @@ describe('TutorService', () => {
       expect(termRepository.save).not.toHaveBeenCalled();
     });
 
+    it('questionId 없이 보내면 문제 조회·개념 캐시 없이 답한다', async () => {
+      const result = await service.chat(undefined, '정규화가 뭐야?');
+
+      expect(result.answer).toBe('정규화는 ...');
+      expect(questionRepository.findOne).not.toHaveBeenCalled();
+      expect(termRepository.findOne).not.toHaveBeenCalled();
+      expect(termRepository.save).not.toHaveBeenCalled();
+    });
+
     it('기본 LLM이면 유효한 개념은 캐시에 저장한다', async () => {
       await service.chat(1, '정규화가 뭐야?');
 
@@ -135,6 +144,49 @@ describe('TutorService', () => {
       expect(termRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({ term: '정규화', model: 'default' }),
       );
+    });
+
+    describe('questionId 없는 일반 대화', () => {
+      beforeEach(() => llmService.complete.mockReset());
+
+      it('general이면 문제 컨텍스트 없는 프롬프트로 이전 대화와 함께 답한다', async () => {
+        llmService.complete
+          .mockResolvedValueOnce(
+            llmResponse({ intent: 'general', term_candidates: [] }),
+          )
+          .mockResolvedValueOnce(llmResponse('공부 방법은 ...'));
+        const history = [
+          { role: 'user' as const, content: '안녕' },
+          { role: 'assistant' as const, content: '안녕하세요' },
+        ];
+
+        const result = await service.chat(null, '공부 어떻게 해?', history);
+
+        expect(result).toEqual({
+          answer: '공부 방법은 ...',
+          intent: 'general',
+          recommendations: undefined,
+        });
+        const messages = llmService.complete.mock.calls[1][1].messages;
+        expect(messages[0].content).not.toContain('[현재 문제 컨텍스트]');
+        expect(messages.slice(1)).toEqual([
+          ...history,
+          { role: 'user', content: '공부 어떻게 해?' },
+        ]);
+      });
+
+      it('recommend면 문제를 조회하지 않고 문제 화면에서 요청하라고 안내한다', async () => {
+        llmService.complete.mockResolvedValueOnce(
+          llmResponse({ intent: 'recommend', term_candidates: ['정규화'] }),
+        );
+
+        const result = await service.chat(undefined, '비슷한 문제 줘');
+
+        expect(result.intent).toBe('recommend');
+        expect(result.recommendations).toBeUndefined();
+        expect(questionRepository.createQueryBuilder).not.toHaveBeenCalled();
+        expect(llmService.complete).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });
