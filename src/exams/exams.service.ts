@@ -30,6 +30,12 @@ const MULTIPLE_ANSWER_MAP: Record<string, number[]> = {
 };
 
 /**
+ * 비로그인 사용자에게 보여 주는 시험당 미리보기 문항 수.
+ * 문제 데이터 대량 수집 대응(11/25 운영 전달 07): 전체 문항과 정답은 로그인 사용자에게만 준다.
+ */
+export const PREVIEW_QUESTION_COUNT = 5;
+
+/**
  * 시험 관리 서비스
  * 외부 사이트에서 시험 데이터를 크롤링하여 DB에 저장
  */
@@ -50,14 +56,15 @@ export class ExamsService {
 
   /**
    * 시험 문제 조회 (페이지네이션 지원)
+   * 정답·해설은 목록에 넣지 않는다. 정답은 findAnswers(로그인 필요), 해설은 튜터 해설 API로 따로 받는다.
    * @param examId - 시험 ID
-   * @param mode - 모드 (study: 정답 포함, test: 정답 미포함)
-   * @param page - 페이지 번호 (1부터 시작, 선택사항)
-   * @param limit - 페이지당 문제 수 (선택사항)
+   * @param isAuthenticated - 로그인 여부. 비로그인은 앞 PREVIEW_QUESTION_COUNT 문항만 받는다
+   * @param page - 페이지 번호 (1부터 시작, 선택사항, 로그인 시에만 적용)
+   * @param limit - 페이지당 문제 수 (선택사항, 로그인 시에만 적용)
    */
   async findQuestions(
     examId: number,
-    mode: 'study' | 'test' = 'test',
+    isAuthenticated: boolean,
     page?: number,
     limit?: number,
   ) {
@@ -74,9 +81,7 @@ export class ExamsService {
       throw new NotFoundException(`시험 id ${examId}를 찾을 수 없습니다.`);
     }
 
-    //2. 문제 조회 (mode에 따라 필요한 필드만 선택)
-    const isStudyMode = mode === 'study';
-
+    //2. 문제 조회 (정답·해설 필드는 선택하지 않음)
     const selectFields: string[] = [
       'question.id',
       'question.question_number',
@@ -89,11 +94,6 @@ export class ExamsService {
       'question.concept_tags',
     ];
 
-    // study 모드일 때만 정답/해설 필드 추가
-    if (isStudyMode) {
-      selectFields.push('question.correct_answers', 'question.explanation');
-    }
-
     // QueryBuilder 생성
     let queryBuilder = this.questionRepository
       .createQueryBuilder('question')
@@ -101,10 +101,14 @@ export class ExamsService {
       .where('question.exam_id = :examId', { examId })
       .orderBy('question.question_number', 'ASC');
 
-    // 페이지네이션 적용 (page와 limit이 모두 제공된 경우에만)
-    if (page && limit) {
+    // 비로그인: 앞 문항 미리보기만 (페이지네이션 무시)
+    const isPaginated = isAuthenticated && !!page && !!limit;
+    if (!isAuthenticated) {
+      queryBuilder = queryBuilder.take(PREVIEW_QUESTION_COUNT);
+    } else if (isPaginated) {
+      // 페이지네이션 적용 (page와 limit이 모두 제공된 경우에만)
       const skip = (page - 1) * limit;
-      queryBuilder = queryBuilder.skip(skip).take(limit);
+      queryBuilder = queryBuilder.skip(skip).take(limit!);
     }
 
     const questions = await queryBuilder.getMany();
@@ -139,18 +143,20 @@ export class ExamsService {
           conceptTags: question.concept_tags,
         };
 
-        //study 모드일때만 정답 및 해설 포함
-        if (isStudyMode) {
-          questionData.correctAnswers = question.correct_answers;
-          questionData.explanation = question.explanation;
-        }
-
         return questionData;
       }),
     };
 
+    // 비로그인 미리보기 표시 (화면에서 "로그인하면 전체 문항" 안내에 사용)
+    if (!isAuthenticated) {
+      response.preview = {
+        limit: PREVIEW_QUESTION_COUNT,
+        totalQuestions: exam.total_questions,
+      };
+    }
+
     // 페이지네이션 정보 추가 (page와 limit이 제공된 경우)
-    if (page && limit) {
+    if (isPaginated && page && limit) {
       response.pagination = {
         page,
         limit,
@@ -165,7 +171,40 @@ export class ExamsService {
   }
 
   /**
+   * 시험 정답 조회 (로그인 사용자 전용, 암기모드에서 사용)
+   * 해설은 포함하지 않는다. 해설은 튜터 해설 API(GET /api/tutor/questions/:id/explanation)로 받는다.
+   */
+  async findAnswers(examId: number) {
+    const exists = await this.examRepository.exist({ where: { id: examId } });
+    if (!exists) {
+      throw new NotFoundException(`시험 id ${examId}를 찾을 수 없습니다.`);
+    }
+
+    const questions = await this.questionRepository
+      .createQueryBuilder('question')
+      .select([
+        'question.id',
+        'question.question_number',
+        'question.correct_answers',
+      ])
+      .where('question.exam_id = :examId', { examId })
+      .orderBy('question.question_number', 'ASC')
+      .getMany();
+
+    return {
+      examId,
+      answers: questions.map((question) => ({
+        questionId: question.id,
+        number: question.question_number,
+        correctAnswers: question.correct_answers,
+      })),
+    };
+  }
+
+  /**
    * 답안 제출 및 채점
+   * 비로그인은 미리보기 문항(앞 PREVIEW_QUESTION_COUNT개)만 채점하고 그 정답만 돌려준다.
+   * (아무 답이나 제출해 전체 정답을 받아 가는 우회를 막기 위함)
    */
   async submitExam(
     examId: number,
@@ -181,7 +220,7 @@ export class ExamsService {
       throw new NotFoundException(`시험 id ${examId}를 찾을 수 없습니다.`);
     }
     //2. 문제 조회 (채점에 필요한 필드만: id, question_number, correct_answers)
-    const questions = await this.questionRepository
+    let gradingQuery = this.questionRepository
       .createQueryBuilder('question')
       .select([
         'question.id',
@@ -189,8 +228,11 @@ export class ExamsService {
         'question.correct_answers',
       ])
       .where('question.exam_id = :examId', { examId })
-      .orderBy('question.question_number', 'ASC')
-      .getMany();
+      .orderBy('question.question_number', 'ASC');
+    if (!userId) {
+      gradingQuery = gradingQuery.take(PREVIEW_QUESTION_COUNT);
+    }
+    const questions = await gradingQuery.getMany();
 
     //3.사용자가 제출한 답안을 Map으로 변환
     const answerMap = new Map(

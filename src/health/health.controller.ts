@@ -96,7 +96,7 @@ export class HealthController {
 
       // 4. 문제 조회 (5개 페이지네이션)
       const findQuestionsStart = performance.now();
-      await this.examsService.findQuestions(1, 'test', 1, 5);
+      await this.examsService.findQuestions(1, true, 1, 5);
       const findQuestionsTime = performance.now() - findQuestionsStart;
 
       results.tests.push({
@@ -108,7 +108,7 @@ export class HealthController {
 
       // 5. 전체 문제 조회 (35개)
       const findAllQuestionsStart = performance.now();
-      await this.examsService.findQuestions(1, 'test');
+      await this.examsService.findQuestions(1, true);
       const findAllQuestionsTime = performance.now() - findAllQuestionsStart;
 
       results.tests.push({

@@ -70,17 +70,6 @@ export class QuestionDto {
 }
 
 /**
- * study 모드 시 추가되는 필드
- */
-export class QuestionStudyDto extends QuestionDto {
-  @ApiProperty({ description: '정답 번호 배열 (복수 정답 가능)', example: [3] })
-  correctAnswers: number[];
-
-  @ApiPropertyOptional({ description: '해설', nullable: true })
-  explanation: string | null;
-}
-
-/**
  * 시험 메타 정보
  */
 export class ExamInfoDto {
@@ -98,6 +87,17 @@ export class ExamInfoDto {
 
   @ApiProperty({ description: '연도', example: 2019 })
   year: number;
+}
+
+/**
+ * 비로그인 미리보기 정보 (비로그인 응답에만 포함)
+ */
+export class PreviewDto {
+  @ApiProperty({ description: '비로그인에게 보여 주는 문항 수', example: 5 })
+  limit: number;
+
+  @ApiProperty({ description: '시험 전체 문항 수', example: 35 })
+  totalQuestions: number;
 }
 
 /**
@@ -131,11 +131,16 @@ export class FindQuestionsResponseDto {
   exam: ExamInfoDto;
 
   @ApiProperty({
-    description:
-      '문제 목록 (test 모드: 기본 필드만, study 모드: correctAnswers, explanation 포함)',
+    description: '문제 목록 (정답·해설 없음)',
     type: [QuestionDto],
   })
-  questions: QuestionDto[] | QuestionStudyDto[];
+  questions: QuestionDto[];
+
+  @ApiPropertyOptional({
+    description: '비로그인일 때만 포함. 앞 몇 문항만 내려줬는지 알려 줌',
+    type: PreviewDto,
+  })
+  preview?: PreviewDto;
 
   @ApiPropertyOptional({
     description: 'page, limit 쿼리 사용 시 페이지네이션 정보',

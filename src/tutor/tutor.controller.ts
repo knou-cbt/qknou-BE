@@ -57,14 +57,17 @@ export class TutorController {
   }
 
   @Get('questions/:id/explanation')
+  // 해설은 정답을 드러내므로 로그인 사용자에게만 준다 (문제 데이터 수집 대응, 운영 전달 07)
+  @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
-    summary: '특정 문제 해설 조회',
+    summary: '특정 문제 해설 조회 (로그인 필요)',
     description:
-      '저장된 해설을 반환합니다. 해설이 없으면 503을 반환합니다(실시간 생성은 기본적으로 꺼져 있음, EXPLANATION_ON_DEMAND=true일 때만 생성).',
+      '저장된 해설을 반환합니다. 로그인이 필요합니다. 해설이 없으면 503을 반환합니다(실시간 생성은 기본적으로 꺼져 있음, EXPLANATION_ON_DEMAND=true일 때만 생성).',
   })
   @ApiParam({ name: 'id', description: '문제 ID', type: Number })
   @ApiResponse({ status: 200, description: '해설 조회 성공' })
+  @ApiResponse({ status: 401, description: '로그인 필요' })
   @ApiResponse({ status: 503, description: '아직 해설이 준비되지 않음' })
   async getExplanation(@Param('id', ParseIntPipe) id: number) {
     const question = await this.questionRepository.findOne({ where: { id } });
