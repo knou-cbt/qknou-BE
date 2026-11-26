@@ -213,6 +213,7 @@ FE 마이페이지 **AI 연결** 탭(`/mypage?tab=ai`) 명세에 맞춰 10/29 �
 | `20261125-3` | 자료구조 2015·2016, 컴퓨터구조 2015~2019, 컴파일러구성 2017~2019 (2학기 기말) 시험 10개·330문항 추가 |
 | `20261125-4` | 위 10개 시험 208문항의 그림·텍스트 정리 (아래 2번 문제) |
 | `20261125-5` | 자료구조 2017~2019 시험 3개·75문항 추가 (11/16에 만든 `20261116-1`은 운영에 반영된 적 없음 → 그림을 새 버킷에 다시 올려 재작성) |
+| `20261126-1` | 위 13개 시험 405문항 해설 입력 (Gemini `gemini-3.8-flash`, 그림 문항은 그림 첨부해 생성). 해설이 비어 있는 문항만 채움 |
 
 **스캔 PDF → 운영 추가 절차** (로컬 DB에서 작업 후 SQL 릴리스로 반영. 결과물은 git 제외 폴더 `tmp/`, `~/qknou-release/`)
 1. `validate-pdf-parse.py` → `seed-exam-from-pdf.py`로 로컬 DB에 저장. boto3나 `R2_*` 환경변수가 없으면 그림이 로컬 경로(`tmp/...`)로 저장되니 `upload-local-images-r2.py --apply`로 R2에 올리고 URL로 교체.
@@ -223,7 +224,11 @@ FE 마이페이지 **AI 연결** 탭(`/mypage?tab=ai`) 명세에 맞춰 10/29 �
 3. `exam-release-sql.py --release <이름> --exam-ids … --note "…"` → 시험 추가 SQL (과목·시험·문항 없을 때만 INSERT).
 4. 운영에 올리기 전: 로컬 `questions` 백업, 운영과 비슷한 DB 사본에서 SQL을 두 번 실행해 중복 없음·내용 일치 확인 → 1절 절차로 업로드.
 
-필요 패키지: `pymupdf boto3 psycopg2-binary`. R2·DB 값은 `.env.development`에서 읽음.
+5. 해설: `generate-exam-explanations.py generate --run <이름> --exam-ids …` → `tmp/explanations/<이름>/results.jsonl` (다시 실행하면 성공분은 건너뜀), `to-sql --run <이름> --release <릴리스> [--apply-local]` → 해설이 빈 문항만 채우는 SQL. 공개 API를 쓰지 않으므로 봇 차단과 무관.
+   - 기본은 Gemini(`GEMINI_API_KEY`), `--provider openai`면 `OPENAI_API_KEY`. Gemini API는 앱 구독(Google AI Pro 등)과 별개 — 무료 등급은 모델당 하루 20회라 AI Studio 프로젝트에 결제 연결 필요(405문항 ≈ 입력 44만·출력 12만 토큰).
+   - r2.dev는 Python 기본 User-Agent를 403으로 막음(스크립트에서 지정함). 모델이 LaTeX 역슬래시를 JSON 이스케이프하지 않는 경우가 있어 `fix_latex_escapes`로 보정.
+
+필요 패키지: `pymupdf boto3 psycopg2-binary`. R2·DB·LLM 키는 `.env.development`에서 읽음.
 
 ## 7. 남은 이슈 / 후속 작업
 
